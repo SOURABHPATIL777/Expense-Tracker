@@ -13,12 +13,14 @@ import { ButtonLink } from "@/frontend/components/Button/Button";
 import { DateText } from "@/frontend/components/DateText/DateText";
 import { Skeleton } from "@/frontend/components/Skeleton/Skeleton";
 import { useApi } from "@/frontend/hooks/useApi";
+import { useMutation } from "@/frontend/hooks/useMutation";
+import { Button } from "@/frontend/components/Button/Button";
 import { formatInr } from "@/frontend/lib/format";
-import { withQuery } from "@/frontend/lib/apiClient";
+import { api, withQuery } from "@/frontend/lib/apiClient";
 import { PERIOD_OPTIONS, periodRange, type PeriodKey } from "@/frontend/lib/periods";
 import { API_ROUTES, PAGE_ROUTES } from "@/shared/constants/routes";
 import { SOURCE_APP_LABELS } from "@/shared/constants/labels";
-import type { OverviewDto } from "@/shared/schemas/reports";
+import type { OverviewDto, SummaryDto } from "@/shared/schemas/reports";
 import styles from "./DashboardPage.module.css";
 
 export default function DashboardPage() {
@@ -27,6 +29,15 @@ export default function DashboardPage() {
   const overview = useApi<OverviewDto>(API_ROUTES.reports.overview, range);
   const d = overview.data;
   const t = d?.totals;
+  const [summary, setSummary] = useState<SummaryDto & { key: string }>();
+  const rangeKey = `${range.from}|${range.to}`;
+  const explain = useMutation(
+    async () => {
+      const { data } = await api.post<SummaryDto>(API_ROUTES.reports.summary, range);
+      setSummary({ ...data, key: rangeKey });
+    },
+    { toastErrors: false },
+  );
   const txLink = (extra: Record<string, string>) => withQuery(PAGE_ROUTES.transactions, { from: range.from, to: range.to, ...extra });
 
   return (
@@ -66,6 +77,33 @@ export default function DashboardPage() {
               hint={d.refunds.openCount ? `${d.refunds.openCount} refund${d.refunds.openCount > 1 ? "s" : ""} waiting${d.refunds.suggestedCount ? `, ${d.refunds.suggestedCount} possible match` : ""}` : "Nothing pending"}
             />
           </div>
+
+          <Card
+            title="In plain words"
+            description="An AI explanation of the totals above. It never calculates; every figure comes from your data."
+            actions={
+              <Button variant="secondary" size="sm" onClick={() => explain.run()} loading={explain.pending}>
+                {summary?.key === rangeKey ? "Refresh" : "Explain this period"}
+              </Button>
+            }
+          >
+            {explain.error ? (
+              <Alert tone="warning">
+                {explain.error.message} {explain.error.code.startsWith("LLM") && <Link href={PAGE_ROUTES.settingsAi}>Set up the summary model</Link>}
+              </Alert>
+            ) : summary?.key === rangeKey ? (
+              <div className={styles.summary}>
+                <p className={styles.headline}>{summary.headline}</p>
+                <ul>
+                  {summary.points.map((pt) => (
+                    <li key={pt}>{pt}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              <p className={styles.muted}>Optional. Uses the model you chose for “Monthly summary” in AI settings.</p>
+            )}
+          </Card>
 
           <div className={styles.columns}>
             <Card title="Spending by category" description="Your personal share, successful payments only.">

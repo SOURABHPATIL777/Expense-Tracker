@@ -1,78 +1,117 @@
 # UPI Spend Tracker
 
-Track spending from **PhonePe, Google Pay and Paytm** (plus bank statements). It separates your personal expenses from own-account transfers, shared bills and refunds you're still waiting for.
+Track spending from **PhonePe, Google Pay and Paytm** (plus bank statements) and see what you *actually* spent.
 
-- **Stack:** Next.js 16 (App Router, Cache Components) · Supabase (Postgres, Auth, Storage, RLS) · Vercel
-- **AI:** Vercel AI SDK with a configurable provider per task: OpenAI (GPT), Google (Gemini), xAI (Grok) or self-hosted Ollama.
-- **Principle:** money math, matching and settlement are deterministic SQL/TypeScript. LLMs only suggest categories and write explanations.
+- Your personal spending is kept separate from transfers between your own accounts, money you paid on behalf of friends, and refunds you're still waiting for.
+- Split a payment and send each friend a **private link**. They can agree and report paying you without signing up.
+
+**Stack:** Next.js 16 (App Router, Cache Components) · Supabase (Postgres, Auth, RLS) · Cloudflare R2 (statement files) · Vercel · Vercel AI SDK with a per-task choice of OpenAI, Gemini, Grok or self-hosted Ollama.
+
+**Principle:** money math, matching and settlement are deterministic SQL/TypeScript. AI only suggests categories and writes explanations, and it is optional.
+
+## What it does
+
+| Area | Details |
+| --- | --- |
+| Import | CSV, Excel or PDF from PhonePe, Google Pay, Paytm, HDFC, ICICI, SBI and all public-sector banks. Unknown CSV/Excel layouts → column mapper, remembered as a template. PDF passwords are used once and never stored. |
+| Reconciliation | The same payment from the app and the bank is matched by UTR into one transaction. Amount + time near-matches go to review and are never merged automatically. Re-imports are deduplicated. |
+| Classification | Order: your rules → merchants you've corrected before → optional AI. Own transfers, refunds, reversals and card bills are detected from the statement itself. Anything you edit is locked against rules/AI. |
+| Dashboard | Personal spending · all money out · paid for others · own transfers · income · refunds · owed to you · money expected back, plus categories and data completeness. |
+| Refunds | Track expected refunds and get matching credits suggested after each import. You confirm the match. An AI can draft a support message. |
+| Splits | Equal, exact or percent splits. Each person gets a private link (32-byte token, only its hash is stored, 7-day expiry, one device). Statuses: agreed / questioned / reported paid, and you confirm received. Edits ask for reconfirmation. |
 
 ## Project layout
 
 ```
 src/
-  app/        Next.js routing shell only: page.tsx re-exports a frontend page, route.ts hands off to a backend controller
-  frontend/   UI: pages/<page>/<Page>.tsx + <Page>.module.css, components/, hooks/, lib/apiClient.ts
-  backend/    server-only: config, constants, http (withHandler), controllers → services → repositories, domain, import, llm, jobs
-  shared/     enums, labels, routes, limits and zod DTO schemas used by both sides
-supabase/migrations/   SQL schema, RLS policies and RPC functions
-tests/unit/            vitest unit tests (+ fixtures/)
+  app/        routing shell only: page.tsx re-exports a frontend page, route.ts hands off to a controller
+  frontend/   pages/<page>/<Page>.tsx + .module.css, components/, hooks/, lib/apiClient.ts
+  backend/    server-only: config, constants, http/withHandler, controllers → services → repositories,
+              domain (matching, allocation, rules), import (readers, engine, presets), llm, jobs
+  shared/     enums, labels, routes, limits, per-source formats (sources.ts), zod DTO schemas, money & split math
+supabase/migrations/   one core migration: schema, RLS, SQL functions
+tests/unit/            vitest unit tests        tests/db/   SQL + RLS tests on PGlite (no Docker needed)
+scripts/               rls-check.ts (live RLS smoke test), mkroute.sh (route generator)
 ```
 
-Layer rules are enforced by ESLint (`no-restricted-imports`):
-- The frontend never imports backend code or Supabase. It calls `/api/v1/*` through `apiClient`.
-- Backend modules import `server-only`, so leaking one into a client bundle fails the build.
+- **Layer rules are enforced by ESLint.** The frontend never imports backend code or Supabase; it calls `/api/v1/*` through `apiClient`. Backend files import `server-only`.
+- **jscpd** fails lint on duplicated code.
+- **Add a bank or app** by writing a config file in `src/backend/import/presets/`. No parser code is needed.
+- **Accepted formats and export instructions** per source live in `src/shared/constants/sources.ts`.
 
-Duplicate code is checked by `jscpd` as part of `npm run lint`.
-
-## Getting started
+## Local development
 
 ```bash
-cp .env.example .env.local     # fill in Supabase + CRON_SECRET (+ any LLM keys)
+cp .env.example .env.local      # fill in the values below
 npm install
-npm run db:link                # one-time: link the hosted Supabase project
-npm run db:push                # apply supabase/migrations
+npm run db:link && npm run db:push
 npm run dev
 ```
 
-Node 20.9+ is required; Node 22+ is recommended (supabase-js is deprecating Node 20).
-
-## File storage (Cloudflare R2)
-
-Statements are uploaded **directly from the browser to the private R2 bucket** `expense-statements` using
-a presigned PUT URL (valid 10 minutes). Credentials never reach the browser. Object keys are
-`<user_id>/<import_id>/<file name>`.
-
-Every object is tracked in the `uploaded_files` table (`user_id`, `file_name`, `file_key`, `status`):
-
-| Status | Meaning |
-| --- | --- |
-| `uploaded` | Upload confirmed (size checked) and the file is at rest, waiting for processing, a password or a column mapping |
-| `processing` | The import job is reading it |
-| `deleted` | Removed from R2 (after a successful import or when the import is deleted); the row is kept as a record |
-
-**One-time bucket setup:** R2 → `expense-statements` → Settings → CORS policy:
-
-```json
-[
-  {
-    "AllowedOrigins": ["http://localhost:3000", "https://<your-vercel-domain>"],
-    "AllowedMethods": ["PUT"],
-    "AllowedHeaders": ["content-type"],
-    "MaxAgeSeconds": 3600
-  }
-]
-```
-
-Keep the bucket private (no public r2.dev access and no custom public domain).
-
-## Scripts
+Node 20.9+ is required; Node 22+ is recommended.
 
 | Script | Purpose |
 | --- | --- |
-| `npm run dev` / `build` / `start` | Next.js |
-| `npm run lint` | ESLint (including layer boundaries) + jscpd duplicate check |
-| `npm run typecheck` | Route type generation + `tsc --noEmit` |
-| `npm test` | Unit tests |
-| `npm run check` | All of the above |
-| `npm run db:push` | Apply migrations to the linked Supabase project |
-| `npm run rls:check` | Row-level-security smoke test against the linked project |
+| `npm run check` | lint (+ boundaries, duplicates) → typecheck → all tests |
+| `npm test` | unit + PGlite database tests |
+| `npm run rls:check` | live RLS smoke test against the project in `.env.local` (creates and deletes throwaway users) |
+| `npm run db:push` / `db:types` | apply migrations / generate DB types |
+
+## Deploying
+
+### 1. Supabase
+1. Create a project and copy its URL, **publishable key** and **secret key**.
+2. **Authentication → Sign In / Providers:**
+   - enable **Email**;
+   - enable **Anonymous sign-ins** (guest split links need it);
+   - turn on CAPTCHA protection for abuse resistance.
+3. **Authentication → URL configuration:**
+   - Site URL = your app URL;
+   - add `https://<app>/api/v1/auth/callback` to the allowed redirect URLs.
+4. Apply the schema: `npm run db:link` (asks for the DB password), then `npm run db:push`.
+5. Run `npm run rls:check`. Every check should pass.
+
+### 2. Cloudflare R2
+1. Use the private bucket `expense-statements`. Keep public access off.
+2. Create an API token with **Object Read & Write** scoped to that bucket.
+3. Under **Settings → CORS policy**, add:
+   ```json
+   [{ "AllowedOrigins": ["http://localhost:3000", "https://<your-domain>"],
+      "AllowedMethods": ["PUT"], "AllowedHeaders": ["content-type"], "MaxAgeSeconds": 3600 }]
+   ```
+4. Optional: add a lifecycle rule that deletes objects older than 7 days. This cleans up uploads that were started but never confirmed. Successful imports already delete their file.
+
+### 3. Vercel
+1. Import the repo and set every variable from `.env.example`. `CRON_SECRET` comes from `openssl rand -hex 32`.
+2. `vercel.json` schedules `/api/v1/jobs/run` once a day as a safety net. Imports start processing immediately via `after()`, so the cron only catches stragglers. On the Pro plan you can raise it to every few minutes, e.g. `*/5 * * * *`. Hobby allows only daily crons.
+3. After deploying:
+   - check `GET /api/v1/health` returns `ok`;
+   - check `GET /api/v1/jobs/run` without the secret returns `401`.
+
+### 4. AI models (optional)
+- **Cloud providers:** set `OPENAI_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY` and/or `XAI_API_KEY`.
+- **Ollama:** a deployed app cannot reach `localhost` on your laptop. Run Ollama on a server behind an authenticated gateway and list it in `OLLAMA_ENDPOINTS=name=https://host/api`. Optionally set `OLLAMA_API_KEY` for a bearer token.
+  - Users choose endpoints by name and can never enter a URL.
+  - Models tagged `:cloud` (e.g. `glm-5.2:cloud`) count as cloud processing.
+- **Enabling a model:** users enable models per task under **Settings → AI models**. A model must pass a live structured-output check before it can be saved. Cloud models also require the user to tick "Allow cloud processing".
+
+## Security & privacy notes
+
+- **Never asked for:** UPI PIN, OTP or bank password. Statements are uploaded by the user.
+- **Row-level security:** RLS is on every table, and owner policies exclude anonymous sessions. Guests reach data only through `SECURITY DEFINER` functions that check their `guest_access` row and return only their own share.
+- **What reaches an AI model:** account numbers, phone numbers, emails and long references are removed first. Statement text is passed to the model as untrusted data. Totals are computed in SQL; the model only explains them.
+- **Guest links:**
+  - links are redeemed only by an explicit POST, never on GET, so chat previews don't consume them;
+  - guest pages and APIs send `no-referrer` and `no-store`;
+  - redemption is rate-limited, and the token is removed from the URL after use.
+- **Logging:** logs are structured JSON with tokens, cookies and personal data redacted. Security-relevant changes are written to `audit_events`.
+
+## Import presets: verification status
+
+Every built-in preset is **marked unverified**. Each was written from a published layout and tested only against synthetic fixtures (`tests/fixtures/synthetic`). To verify one:
+
+1. Add an anonymised real export under `tests/fixtures/real/`.
+2. Add a test for it next to `tests/unit/import/engine.test.ts`.
+3. Set `verified: true` on the preset.
+
+Imports read with an unverified preset show a "please check the rows" badge.

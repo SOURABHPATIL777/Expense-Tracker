@@ -8,7 +8,10 @@ import { RefundsRepository } from "@/backend/repositories/refunds.repository";
 import { istDateRange, todayIst } from "@/backend/domain/period";
 import { reviewService } from "./review.service";
 import { splitsService } from "./splits.service";
-import type { CategoryTotalDto, OverviewDto, OverviewTotalsDto, ReportRange, SourceStatusDto } from "@/shared/schemas/reports";
+import { runLlmTask } from "@/backend/llm/run";
+import { SUMMARY_INSTRUCTIONS, summaryData, summarySchema } from "@/backend/llm/prompts/summary";
+import { REPORTS } from "@/backend/constants/app.constants";
+import type { CategoryTotalDto, OverviewDto, OverviewTotalsDto, ReportRange, SourceStatusDto, SummaryDto } from "@/shared/schemas/reports";
 import type { SourceApp } from "@/shared/constants/enums";
 
 const RECENT_IMPORTS = 100;
@@ -89,6 +92,19 @@ export function reportsService(db: Db) {
   return {
     totals,
     categories,
+
+    /** AI-written explanation of SQL-computed totals; it receives formatted figures, never raw transactions. */
+    async summary(userId: string, range: ReportRange): Promise<SummaryDto> {
+      const [t, c] = await Promise.all([totals(range), categories(userId, range)]);
+      const out = await runLlmTask(db, {
+        userId,
+        task: "monthly_summary",
+        schema: summarySchema,
+        instructions: SUMMARY_INSTRUCTIONS,
+        data: summaryData(range, t, c, REPORTS.TOP_CATEGORIES),
+      });
+      return { ...out, generatedAt: new Date().toISOString() };
+    },
     async overview(userId: string, range: ReportRange): Promise<OverviewDto> {
       const [t, c, refunds, openReviewCount, s, owedToYouMinor] = await Promise.all([
         totals(range),

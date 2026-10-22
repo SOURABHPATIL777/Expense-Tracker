@@ -42,3 +42,5 @@ export type OverviewDto = {
   openReviewCount: number;
   sources: SourceStatusDto[];
 };
+
+export type SummaryDto = { headline: string; points: string[]; generatedAt: string };
