@@ -29,11 +29,17 @@ export async function uploadStatement(
   );
 
   opts.onStage?.("uploading");
-  const put = await fetch(data.upload.url, {
-    method: "PUT",
-    body: file,
-    headers: { "Content-Type": file.type || "application/octet-stream" },
-  });
+  let put: Response;
+  try {
+    put = await fetch(data.upload.url, {
+      method: "PUT",
+      body: file,
+      headers: { "Content-Type": file.type || "application/octet-stream" },
+    });
+  } catch {
+    // The browser blocks the request outright (no status) when storage CORS doesn't allow this site.
+    throw new ApiError("UPLOAD_BLOCKED", "Couldn't reach file storage. Check your connection; if it persists, storage CORS may not allow this site.", 0);
+  }
   if (!put.ok) throw new ApiError("UPLOAD_FAILED", "The file upload failed. Please try again.", put.status);
 
   opts.onStage?.("queuing");

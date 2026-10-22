@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { PageHeader } from "@/frontend/components/PageHeader/PageHeader";
@@ -31,6 +32,10 @@ import { passwordSchema, type ImportDto, type ImportRowDto } from "@/shared/sche
 import styles from "./ImportReviewPage.module.css";
 
 const IN_PROGRESS = new Set<ImportStatus>(["uploaded", "queued", "parsing", "processing"]);
+/** An import still "uploaded" after this long means the browser never finished sending the file. */
+const UPLOAD_STALL_MS = 2 * 60_000;
+
+const isStalledUpload = (d: ImportDto, now: number) => d.status === "uploaded" && now - Date.parse(d.createdAt) > UPLOAD_STALL_MS;
 
 const ROW_STATUS_LABELS: LabelMap<string> = {
   pending: { label: "Waiting", tone: "neutral" },
@@ -64,7 +69,9 @@ export default function ImportReviewPage() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const imp = useApi<ImportDto>(API_ROUTES.import(id));
   const rows = usePaginatedList<ImportRowDto>(API_ROUTES.importRows(id), { status: rowFilter });
-  const inProgress = imp.data ? IN_PROGRESS.has(imp.data.status) : true;
+  const [now] = useState(() => Date.now());
+  const stalled = imp.data ? isStalledUpload(imp.data, now) : false;
+  const inProgress = imp.data ? IN_PROGRESS.has(imp.data.status) && !stalled : true;
 
   usePolling(imp.reload, inProgress);
   usePolling(rows.reload, inProgress, 4000);
@@ -108,6 +115,12 @@ export default function ImportReviewPage() {
         </div>
 
         {d.errorMessage && <Alert tone={d.status === "failed" ? "danger" : "warning"}>{d.errorMessage}</Alert>}
+        {stalled && (
+          <Alert tone="warning" title="The file never finished uploading">
+            Go back to <Link href={PAGE_ROUTES.imports}>Imports</Link> and upload the same file again; this import will be reused. If it keeps happening, the
+            storage bucket&apos;s CORS policy may not allow this site.
+          </Alert>
+        )}
 
         <div className={styles.stats}>
           <StatCard label="New transactions" value={d.counts.imported} tone="success" />
