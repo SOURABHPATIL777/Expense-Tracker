@@ -10,8 +10,6 @@ export const AUTH_MODES = {
   USER: "user",
   /** Any session, including Supabase anonymous guests. */
   SESSION: "session",
-  /** Vercel Cron / internal trigger holding CRON_SECRET. */
-  CRON: "cron",
 } as const;
 export type AuthMode = (typeof AUTH_MODES)[keyof typeof AUTH_MODES];
 

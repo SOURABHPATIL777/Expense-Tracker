@@ -13,7 +13,7 @@ type ClaimedJob = { id: string; type: JobType; user_id: string; payload: unknown
 
 /**
  * Claims jobs with SKIP LOCKED and runs them until the time budget is spent. Safe to run
- * concurrently from several invocations (cron + post-upload triggers).
+ * concurrently from several invocations (post-upload and traffic-triggered passes).
  */
 export async function runWorker({ budgetMs = JOBS.WORKER_BUDGET_MS }: { budgetMs?: number } = {}): Promise<{ processed: number; failed: number }> {
   const db = getAdminClient();
@@ -74,7 +74,7 @@ async function execute(db: Db, job: ClaimedJob): Promise<boolean> {
   }
 }
 
-/** Starts a short worker pass after the current response is sent (no waiting for cron). */
+/** Starts a short worker pass after the current response is sent. */
 export function kickWorker(budgetMs: number = JOBS.WORKER_BUDGET_MS): void {
   after(() => runWorker({ budgetMs }).catch((err) => logger.error({ err }, "worker kick failed")));
 }

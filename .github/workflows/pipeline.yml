@@ -84,5 +84,3 @@ jobs:
           BASE_URL: ${{ vars.PRODUCTION_URL || steps.ship.outputs.url }}
         run: |
           curl --fail --silent --show-error --retry 5 --retry-delay 5 "$BASE_URL/api/v1/health"
-          # The cron endpoint must refuse callers without CRON_SECRET.
-          test "$(curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/api/v1/jobs/run")" = "401"

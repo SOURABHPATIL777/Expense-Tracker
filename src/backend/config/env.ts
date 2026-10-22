@@ -37,7 +37,6 @@ const envSchema = z.object({
   SUPABASE_URL: z.url(),
   SUPABASE_PUBLISHABLE_KEY: z.string().min(20),
   SUPABASE_SECRET_KEY: z.string().min(20),
-  CRON_SECRET: z.string().min(32, "CRON_SECRET must be at least 32 characters"),
   // Cloudflare R2 (S3-compatible) holds uploaded statements.
   R2_ACCOUNT_ID: z.string().regex(/^[0-9a-f]{32}$/, "R2_ACCOUNT_ID is the 32-character Cloudflare account ID"),
   R2_ACCESS_KEY_ID: z.string().min(16),

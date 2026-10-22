@@ -52,7 +52,6 @@ export const API_ROUTES = {
     respond: `${API_BASE}/guest/respond`,
     payment: `${API_BASE}/guest/payment`,
   },
-  jobsRun: `${API_BASE}/jobs/run`,
 } as const;
 
 export const PAGE_ROUTES = {

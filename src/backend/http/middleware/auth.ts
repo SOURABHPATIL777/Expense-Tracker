@@ -22,7 +22,7 @@ export async function readAuth(db: Db): Promise<AuthContext | null> {
 }
 
 export function assertAuth(mode: AuthMode, auth: AuthContext | null): void {
-  if (mode === AUTH_MODES.PUBLIC || mode === AUTH_MODES.CRON) return;
+  if (mode === AUTH_MODES.PUBLIC) return;
   if (!auth) throw new AppError("UNAUTHENTICATED");
   if (mode === AUTH_MODES.USER && auth.isAnonymous) throw new AppError("FORBIDDEN");
 }

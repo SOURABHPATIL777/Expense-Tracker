@@ -9,7 +9,6 @@ import { AUTH_MODES, type AuthMode } from "@/backend/constants/enums.constants";
 import { HEADERS, type RateLimitPolicy } from "@/backend/constants/security.constants";
 import { assertAuth, readAuth, type AuthContext } from "./middleware/auth";
 import { assertSameOrigin } from "./middleware/origin";
-import { assertCronSecret } from "./middleware/cronAuth";
 import { clientIp, enforceRateLimit } from "./middleware/rateLimit";
 import { kickWorkerOpportunistically } from "@/backend/jobs/worker";
 import type { ApiFailure, ApiSuccess, PageMeta } from "@/shared/schemas/common";
@@ -70,11 +69,10 @@ export function withHandler<
     const extraHeaders = options.headers ?? [];
 
     try {
-      if (options.auth === AUTH_MODES.CRON) assertCronSecret(req);
-      else assertSameOrigin(req);
+      assertSameOrigin(req);
 
       const db = await createUserClient();
-      const auth = options.auth === AUTH_MODES.CRON ? null : await readAuth(db);
+      const auth = await readAuth(db);
       assertAuth(options.auth, auth);
 
       if (options.rateLimit) {

@@ -82,14 +82,12 @@ Node 20.9+ is required; Node 22+ is recommended.
 4. Optional: add a lifecycle rule that deletes objects older than 7 days. This cleans up uploads that were started but never confirmed. Successful imports already delete their file.
 
 ### 3. Vercel
-1. Import the repo and set every variable from `.env.example`. `CRON_SECRET` comes from `openssl rand -hex 32`.
+1. Import the repo and set the variables from `.env.example`.
 2. **No cron is needed.** Background jobs run in the app itself:
    - Uploads, column mappings and "re-apply rules" start the worker right after the response, via `after()`.
    - Every signed-in API request also starts a short worker pass, at most once a minute per instance. This picks up retried or interrupted jobs.
-   - `/api/v1/jobs/run` (`Authorization: Bearer <CRON_SECRET>`) remains for an optional external pinger.
 3. After deploying:
-   - check `GET /api/v1/health` returns `ok`;
-   - check `GET /api/v1/jobs/run` without the secret returns `401`.
+   - check `GET /api/v1/health` returns `ok`.
 
 ### 4. AI models (optional)
 - **Cloud providers:** set `OPENAI_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY` and/or `XAI_API_KEY`.

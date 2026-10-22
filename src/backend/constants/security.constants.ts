@@ -18,7 +18,6 @@ export type RateLimitPolicy = (typeof RATE_LIMITS)[keyof typeof RATE_LIMITS];
 export const HEADERS = {
   REQUEST_ID: "x-request-id",
   IDEMPOTENCY_KEY: "idempotency-key",
-  CRON_AUTH: "authorization",
 } as const;
 
 export { SECURITY_HEADERS, GUEST_HEADERS } from "@/shared/constants/headers";
