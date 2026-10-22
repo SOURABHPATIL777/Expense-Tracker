@@ -37,6 +37,8 @@ export type OverviewDto = {
   totals: OverviewTotalsDto;
   categories: CategoryTotalDto[];
   refunds: { expectedMinor: number; openCount: number; suggestedCount: number; overdueCount: number };
+  /** Still owed to you across open splits (not limited to the period). */
+  owedToYouMinor: number;
   openReviewCount: number;
   sources: SourceStatusDto[];
 };

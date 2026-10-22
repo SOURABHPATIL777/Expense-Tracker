@@ -61,7 +61,7 @@ export type TransactionDto = TransactionSummaryDto & {
 
 export type TransactionSourceDto = { importId: string; fileName: string | null; sourceKind: SourceKind; sourceApp: string; addedAt: string };
 
-export type TransactionDetailDto = TransactionDto & { sources: TransactionSourceDto[]; openRefundId: string | null };
+export type TransactionDetailDto = TransactionDto & { sources: TransactionSourceDto[]; openRefundId: string | null; splitId: string | null };
 
 /** Edit form: empty category = uncategorised, empty note = no note. */
 export const transactionEditFormSchema = z.object({

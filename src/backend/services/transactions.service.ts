@@ -5,6 +5,7 @@ import { AUDIT_ACTIONS } from "@/backend/constants/enums.constants";
 import { TABLES } from "@/backend/constants/db.constants";
 import { TransactionsRepository } from "@/backend/repositories/transactions.repository";
 import { RefundsRepository } from "@/backend/repositories/refunds.repository";
+import { SharedExpensesRepository } from "@/backend/repositories/splits.repository";
 import type { Query } from "@/backend/repositories/BaseRepository";
 import { toTransactionDto } from "@/backend/mappers/transactions.mapper";
 import { istDateRange } from "@/backend/domain/period";
@@ -55,11 +56,15 @@ export function transactionsService(db: Db) {
           .order("created_at"),
         "transactions.sources",
       ) as unknown as Array<{ import_id: string; source_kind: SourceKind; source_app: string; created_at: string; imports: { file_name: string } | null }>;
-      const refund = await new RefundsRepository(db).findActiveForTransaction(userId, id);
+      const [refund, split] = await Promise.all([
+        new RefundsRepository(db).findActiveForTransaction(userId, id),
+        new SharedExpensesRepository(db).findOptional(userId, (q) => q.eq("transaction_id", id).neq("status", "cancelled")),
+      ]);
       return {
         ...toTransactionDto(tx),
         sources: sources.map((s) => ({ importId: s.import_id, fileName: s.imports?.file_name ?? null, sourceKind: s.source_kind, sourceApp: s.source_app, addedAt: s.created_at })),
         openRefundId: refund?.id ?? null,
+        splitId: split?.id ?? null,
       };
     },
 

@@ -10,11 +10,14 @@ import { DateText } from "@/frontend/components/DateText/DateText";
 import { Badge, StatusBadge } from "@/frontend/components/StatusBadge/StatusBadge";
 import { Skeleton } from "@/frontend/components/Skeleton/Skeleton";
 import { ExpectRefundModal } from "@/frontend/components/ExpectRefundModal/ExpectRefundModal";
+import { SplitEditor } from "@/frontend/components/SplitEditor/SplitEditor";
+import { ButtonLink } from "@/frontend/components/Button/Button";
 import { useToast } from "@/frontend/components/Toast/Toast";
 import { optionsFrom, type Option } from "@/frontend/components/Select/Select";
 import { useApi } from "@/frontend/hooks/useApi";
+import { useRouter } from "next/navigation";
 import { api } from "@/frontend/lib/apiClient";
-import { API_ROUTES } from "@/shared/constants/routes";
+import { API_ROUTES, PAGE_ROUTES } from "@/shared/constants/routes";
 import { TRANSACTION_KINDS, type SourceApp } from "@/shared/constants/enums";
 import { SOURCE_APP_LABELS, TRANSACTION_KIND_LABELS, TRANSACTION_STATUS_LABELS } from "@/shared/constants/labels";
 import { transactionEditFormSchema, type TransactionDetailDto } from "@/shared/schemas/transactions";
@@ -35,6 +38,8 @@ export function TransactionDetailModal({ id, categoryOptions, onClose, onChanged
   const toast = useToast();
   const detail = useApi<TransactionDetailDto>(id ? API_ROUTES.transaction(id) : null);
   const [refundFor, setRefundFor] = useState<TransactionDetailDto | null>(null);
+  const [splitting, setSplitting] = useState<TransactionDetailDto | null>(null);
+  const router = useRouter();
   const t = detail.data && detail.data.id === id ? detail.data : undefined;
 
   async function save(values: z.infer<typeof transactionEditFormSchema>) {
@@ -54,7 +59,7 @@ export function TransactionDetailModal({ id, categoryOptions, onClose, onChanged
 
   return (
     <>
-      <Modal open={id !== null && refundFor === null} title="Transaction" onClose={onClose}>
+      <Modal open={id !== null && refundFor === null && splitting === null} title="Transaction" onClose={onClose}>
         {!t ? (
           <Skeleton lines={6} />
         ) : (
@@ -126,6 +131,16 @@ export function TransactionDetailModal({ id, categoryOptions, onClose, onChanged
                 </Button>
               )}
               {t.openRefundId && <Badge tone="warning">Refund being tracked</Badge>}
+              {t.direction === "debit" && t.status === "success" && !t.splitId && (
+                <Button variant="secondary" onClick={() => setSplitting(t)}>
+                  Split this payment
+                </Button>
+              )}
+              {t.splitId && (
+                <ButtonLink href={PAGE_ROUTES.split(t.splitId)} variant="secondary">
+                  View split
+                </ButtonLink>
+              )}
               {t.userLocked && (
                 <Button variant="ghost" onClick={unlock}>
                   Let rules &amp; AI decide again
@@ -135,6 +150,14 @@ export function TransactionDetailModal({ id, categoryOptions, onClose, onChanged
           </div>
         )}
       </Modal>
+      {splitting && (
+        <SplitEditor
+          open
+          transaction={splitting}
+          onClose={() => setSplitting(null)}
+          onSaved={(split) => router.push(PAGE_ROUTES.split(split.id))}
+        />
+      )}
       <ExpectRefundModal
         tx={refundFor}
         onClose={() => setRefundFor(null)}

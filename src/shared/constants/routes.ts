@@ -44,6 +44,8 @@ export const API_ROUTES = {
   split: (id: string) => `${API_BASE}/splits/${id}`,
   splitInvite: (id: string, participantId: string) => `${API_BASE}/splits/${id}/participants/${participantId}/invite`,
   splitClaim: (id: string, claimId: string) => `${API_BASE}/splits/${id}/claims/${claimId}`,
+  splitStatus: (id: string) => `${API_BASE}/splits/${id}/status`,
+  splitPayments: (id: string) => `${API_BASE}/splits/${id}/payments`,
   guest: {
     redeem: `${API_BASE}/guest/redeem`,
     share: `${API_BASE}/guest/share`,

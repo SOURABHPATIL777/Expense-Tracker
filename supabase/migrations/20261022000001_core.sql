@@ -24,6 +24,10 @@ create type public.llm_provider as enum ('openai', 'google', 'xai', 'ollama');
 create type public.llm_task as enum ('categorize', 'monthly_summary', 'refund_message');
 create type public.job_type as enum ('parse_import', 'classify_transactions', 'match_refunds');
 create type public.job_status as enum ('queued', 'running', 'succeeded', 'failed', 'dead');
+create type public.split_method as enum ('equal', 'exact', 'percent');
+create type public.shared_expense_status as enum ('open', 'closed', 'cancelled');
+create type public.participant_response as enum ('pending', 'agreed', 'questioned');
+create type public.claim_status as enum ('reported', 'confirmed', 'rejected', 'withdrawn');
 
 -- ---------------------------------------------------------------------------
 -- Helpers
@@ -367,6 +371,101 @@ create unique index refund_expectations_tx_uidx on public.refund_expectations (t
 create index refund_expectations_user_idx on public.refund_expectations (user_id, status);
 
 -- ---------------------------------------------------------------------------
+-- Shared expenses (splits). `user_id` is always the owner (the person who paid).
+-- Guests never get table access; they act only through the guest_* functions below.
+-- ---------------------------------------------------------------------------
+create table public.shared_expenses (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+  transaction_id uuid references public.transactions (id) on delete set null,
+  title text not null check (char_length(title) between 1 and 120),
+  total_minor bigint not null check (total_minor > 0),
+  currency char(3) not null default 'INR',
+  split_method public.split_method not null,
+  note text check (char_length(note) <= 500),
+  -- Bumped on every edit; an agreement given to an older version needs reconfirming.
+  version integer not null default 1,
+  status public.shared_expense_status not null default 'open',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index shared_expenses_user_idx on public.shared_expenses (user_id, created_at desc);
+create unique index shared_expenses_tx_uidx on public.shared_expenses (transaction_id) where transaction_id is not null and status <> 'cancelled';
+
+create table public.expense_participants (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+  expense_id uuid not null references public.shared_expenses (id) on delete cascade,
+  display_name text not null check (char_length(display_name) between 1 and 80),
+  -- The owner's own share row (exactly one per expense).
+  is_owner boolean not null default false,
+  share_minor bigint not null check (share_minor >= 0),
+  response_status public.participant_response not null default 'pending',
+  accepted_version integer,
+  responded_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index expense_participants_expense_idx on public.expense_participants (expense_id);
+create unique index expense_participants_owner_uidx on public.expense_participants (expense_id) where is_owner;
+
+create table public.share_invites (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+  participant_id uuid not null references public.expense_participants (id) on delete cascade,
+  -- SHA-256 of the 32-byte random token; the token itself is never stored.
+  token_hash text not null unique check (token_hash ~ '^[0-9a-f]{64}$'),
+  expires_at timestamptz not null,
+  redeemed_by uuid references auth.users (id) on delete set null,
+  redeemed_at timestamptz,
+  revoked_at timestamptz,
+  created_at timestamptz not null default now()
+);
+create index share_invites_participant_idx on public.share_invites (participant_id);
+
+create table public.guest_access (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+  participant_id uuid not null references public.expense_participants (id) on delete cascade,
+  auth_user_id uuid not null references auth.users (id) on delete cascade,
+  expires_at timestamptz not null,
+  revoked_at timestamptz,
+  created_at timestamptz not null default now()
+);
+create unique index guest_access_active_uidx on public.guest_access (participant_id) where revoked_at is null;
+create index guest_access_auth_idx on public.guest_access (auth_user_id) where revoked_at is null;
+
+create table public.payment_claims (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+  participant_id uuid not null references public.expense_participants (id) on delete cascade,
+  amount_minor bigint not null check (amount_minor > 0),
+  status public.claim_status not null default 'reported',
+  reported_by text not null check (reported_by in ('guest', 'owner')),
+  -- Incoming credit the owner linked as this repayment, if any.
+  matched_transaction_id uuid references public.transactions (id) on delete set null,
+  note text check (char_length(note) <= 300),
+  idempotency_key text not null check (char_length(idempotency_key) between 8 and 128),
+  reported_at timestamptz not null default now(),
+  resolved_at timestamptz,
+  unique (participant_id, idempotency_key)
+);
+create index payment_claims_participant_idx on public.payment_claims (participant_id);
+
+create table public.expense_events (
+  id bigint generated always as identity primary key,
+  user_id uuid not null references auth.users (id) on delete cascade,
+  expense_id uuid not null references public.shared_expenses (id) on delete cascade,
+  participant_id uuid references public.expense_participants (id) on delete set null,
+  actor text not null check (actor in ('owner', 'guest')),
+  action text not null,
+  version integer not null,
+  metadata jsonb not null default '{}',
+  created_at timestamptz not null default now()
+);
+create index expense_events_expense_idx on public.expense_events (expense_id, created_at);
+
+-- ---------------------------------------------------------------------------
 -- AI configuration & runs
 -- ---------------------------------------------------------------------------
 create table public.llm_configs (
@@ -622,6 +721,309 @@ as $$
 $$;
 
 -- ---------------------------------------------------------------------------
+-- Splits: owner side (security invoker → owner RLS applies)
+-- ---------------------------------------------------------------------------
+
+-- Creates or edits a split atomically. Shares are computed by the API (one allocation function
+-- shared with the UI); this re-checks the invariants and records the owner's share on the payment
+-- so reports count only the owner's part as personal spending.
+create or replace function public.save_split(
+  p_expense_id uuid,
+  p_transaction_id uuid,
+  p_title text,
+  p_method public.split_method,
+  p_total_minor bigint,
+  p_participants jsonb,
+  p_note text
+)
+returns uuid
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_id uuid;
+  v_tx public.transactions;
+  v_exp public.shared_expenses;
+  v_owner_share bigint;
+  v_keep uuid[] := '{}';
+  v_pid uuid;
+  p jsonb;
+begin
+  if not public.is_permanent_user() then
+    raise exception 'APP:FORBIDDEN';
+  end if;
+  if (select coalesce(sum((x ->> 'shareMinor')::bigint), 0) from jsonb_array_elements(p_participants) x) <> p_total_minor then
+    raise exception 'APP:VALIDATION';
+  end if;
+  if (select count(*) from jsonb_array_elements(p_participants) x where (x ->> 'isOwner')::boolean) <> 1 then
+    raise exception 'APP:VALIDATION';
+  end if;
+  select (x ->> 'shareMinor')::bigint into v_owner_share
+    from jsonb_array_elements(p_participants) x where (x ->> 'isOwner')::boolean;
+
+  if p_expense_id is null then
+    if p_transaction_id is not null then
+      select * into v_tx from public.transactions where id = p_transaction_id and user_id = auth.uid() for update;
+      if v_tx.id is null then
+        raise exception 'APP:NOT_FOUND';
+      end if;
+      if v_tx.direction <> 'debit' or v_tx.amount_minor <> p_total_minor then
+        raise exception 'APP:VALIDATION';
+      end if;
+    end if;
+    insert into public.shared_expenses (user_id, transaction_id, title, total_minor, split_method, note)
+    values (auth.uid(), p_transaction_id, p_title, p_total_minor, p_method, p_note)
+    returning id into v_id;
+  else
+    select * into v_exp from public.shared_expenses where id = p_expense_id and user_id = auth.uid() for update;
+    if v_exp.id is null then
+      raise exception 'APP:NOT_FOUND';
+    end if;
+    if v_exp.status <> 'open' then
+      raise exception 'APP:INVALID_STATE';
+    end if;
+    if v_exp.transaction_id is not null and v_exp.total_minor <> p_total_minor then
+      raise exception 'APP:VALIDATION';
+    end if;
+    v_id := p_expense_id;
+    update public.shared_expenses
+       set title = p_title, total_minor = p_total_minor, split_method = p_method, note = p_note, version = version + 1
+     where id = v_id;
+  end if;
+
+  for p in select * from jsonb_array_elements(p_participants) loop
+    if nullif(p ->> 'id', '') is not null then
+      update public.expense_participants
+         set display_name = p ->> 'displayName', share_minor = (p ->> 'shareMinor')::bigint, is_owner = (p ->> 'isOwner')::boolean
+       where id = (p ->> 'id')::uuid and expense_id = v_id
+      returning id into v_pid;
+      if v_pid is null then
+        raise exception 'APP:NOT_FOUND';
+      end if;
+    else
+      insert into public.expense_participants (user_id, expense_id, display_name, is_owner, share_minor, response_status, accepted_version)
+      values (
+        auth.uid(), v_id, p ->> 'displayName', (p ->> 'isOwner')::boolean, (p ->> 'shareMinor')::bigint,
+        case when (p ->> 'isOwner')::boolean then 'agreed'::public.participant_response else 'pending'::public.participant_response end,
+        null
+      )
+      returning id into v_pid;
+    end if;
+    v_keep := v_keep || v_pid;
+  end loop;
+
+  -- Someone who already reported or was confirmed paying can't silently disappear from the split.
+  if exists (
+    select 1 from public.payment_claims c
+      join public.expense_participants ep on ep.id = c.participant_id
+     where ep.expense_id = v_id and not (ep.id = any (v_keep)) and c.status in ('reported', 'confirmed')
+  ) then
+    raise exception 'APP:INVALID_STATE';
+  end if;
+  delete from public.expense_participants where expense_id = v_id and not (id = any (v_keep));
+
+  update public.expense_participants set accepted_version = (select version from public.shared_expenses where id = v_id)
+   where expense_id = v_id and is_owner;
+
+  update public.transactions t
+     set personal_share_minor = v_owner_share
+   where t.id = (select transaction_id from public.shared_expenses where id = v_id);
+
+  insert into public.expense_events (user_id, expense_id, actor, action, version)
+  select auth.uid(), v_id, 'owner', case when p_expense_id is null then 'created' else 'edited' end, version
+    from public.shared_expenses where id = v_id;
+  return v_id;
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- Splits: guest side (security definer; every function checks the caller's guest_access)
+-- ---------------------------------------------------------------------------
+
+-- Binds an invitation to the calling session (anonymous or signed in). Idempotent for the same
+-- session; a different session cannot take over an already-opened link.
+create or replace function public.redeem_invite(p_token_hash text)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_inv public.share_invites;
+  v_part public.expense_participants;
+begin
+  if auth.uid() is null then
+    raise exception 'APP:UNAUTHENTICATED';
+  end if;
+  select * into v_inv from public.share_invites where token_hash = p_token_hash for update;
+  if v_inv.id is null or v_inv.revoked_at is not null or v_inv.expires_at < now() then
+    raise exception 'APP:INVITE_INVALID';
+  end if;
+  if v_inv.redeemed_by is not null then
+    if v_inv.redeemed_by = auth.uid() then
+      return v_inv.participant_id;
+    end if;
+    raise exception 'APP:INVITE_TAKEN';
+  end if;
+  if v_inv.user_id = auth.uid() then
+    raise exception 'APP:INVALID_STATE';
+  end if;
+  select * into v_part from public.expense_participants where id = v_inv.participant_id;
+
+  update public.share_invites set redeemed_by = auth.uid(), redeemed_at = now() where id = v_inv.id;
+  update public.guest_access set revoked_at = now() where participant_id = v_inv.participant_id and revoked_at is null;
+  insert into public.guest_access (user_id, participant_id, auth_user_id, expires_at)
+  values (v_inv.user_id, v_inv.participant_id, auth.uid(), now() + interval '90 days');
+  insert into public.expense_events (user_id, expense_id, participant_id, actor, action, version)
+  select v_inv.user_id, v_part.expense_id, v_part.id, 'guest', 'link_opened', e.version
+    from public.shared_expenses e where e.id = v_part.expense_id;
+  return v_inv.participant_id;
+end;
+$$;
+
+-- The participant the caller may act as, or an error. Central access check for guest functions.
+create or replace function public.guest_participant(p_participant_id uuid)
+returns public.expense_participants
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  v_part public.expense_participants;
+begin
+  select ep.* into v_part
+    from public.guest_access ga
+    join public.expense_participants ep on ep.id = ga.participant_id
+   where ga.participant_id = p_participant_id
+     and ga.auth_user_id = auth.uid()
+     and ga.revoked_at is null
+     and ga.expires_at > now();
+  if v_part.id is null then
+    raise exception 'APP:FORBIDDEN';
+  end if;
+  return v_part;
+end;
+$$;
+
+-- Everything the caller's guest sessions may see: only their own share, never other
+-- participants or the owner's wider data.
+create or replace function public.guest_get_share()
+returns jsonb
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select coalesce(jsonb_agg(row order by row ->> 'createdAt' desc), '[]'::jsonb)
+  from (
+    select jsonb_build_object(
+      'participantId', ep.id,
+      'displayName', ep.display_name,
+      'ownerName', coalesce(pr.display_name, 'Someone'),
+      'title', e.title,
+      'occurredAt', coalesce(t.occurred_at, e.created_at),
+      'totalMinor', e.total_minor,
+      'shareMinor', ep.share_minor,
+      'status', e.status,
+      'version', e.version,
+      'responseStatus', ep.response_status,
+      'needsReconfirm', ep.response_status = 'agreed' and coalesce(ep.accepted_version, 0) < e.version,
+      'confirmedMinor', coalesce((select sum(c.amount_minor) from public.payment_claims c where c.participant_id = ep.id and c.status = 'confirmed'), 0),
+      'reportedMinor', coalesce((select sum(c.amount_minor) from public.payment_claims c where c.participant_id = ep.id and c.status = 'reported'), 0),
+      'claims', coalesce((
+        select jsonb_agg(jsonb_build_object('id', c.id, 'amountMinor', c.amount_minor, 'status', c.status, 'reportedAt', c.reported_at) order by c.reported_at desc)
+          from public.payment_claims c where c.participant_id = ep.id
+      ), '[]'::jsonb),
+      'createdAt', e.created_at
+    ) as row
+      from public.guest_access ga
+      join public.expense_participants ep on ep.id = ga.participant_id
+      join public.shared_expenses e on e.id = ep.expense_id
+      left join public.transactions t on t.id = e.transaction_id
+      left join public.profiles pr on pr.id = e.user_id
+     where ga.auth_user_id = auth.uid() and ga.revoked_at is null and ga.expires_at > now()
+       and e.status <> 'cancelled'
+  ) s
+$$;
+
+create or replace function public.guest_respond(p_participant_id uuid, p_response public.participant_response, p_version integer, p_message text)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_part public.expense_participants := public.guest_participant(p_participant_id);
+  v_exp public.shared_expenses;
+begin
+  if p_response = 'pending' then
+    raise exception 'APP:VALIDATION';
+  end if;
+  select * into v_exp from public.shared_expenses where id = v_part.expense_id for update;
+  if v_exp.status <> 'open' then
+    raise exception 'APP:INVALID_STATE';
+  end if;
+  if v_exp.version <> p_version then
+    raise exception 'APP:VERSION_MISMATCH';
+  end if;
+  update public.expense_participants
+     set response_status = p_response,
+         accepted_version = case when p_response = 'agreed' then v_exp.version else accepted_version end,
+         responded_at = now()
+   where id = v_part.id;
+  insert into public.expense_events (user_id, expense_id, participant_id, actor, action, version, metadata)
+  values (v_exp.user_id, v_exp.id, v_part.id, 'guest', p_response::text, v_exp.version,
+          case when p_message is null then '{}'::jsonb else jsonb_build_object('message', left(p_message, 300)) end);
+end;
+$$;
+
+-- A guest says they paid. It is a claim, not a settlement: only the owner can confirm it.
+create or replace function public.guest_report_payment(p_participant_id uuid, p_amount_minor bigint, p_idempotency_key text, p_note text)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_part public.expense_participants := public.guest_participant(p_participant_id);
+  v_exp public.shared_expenses;
+  v_existing uuid;
+  v_outstanding bigint;
+  v_id uuid;
+begin
+  select id into v_existing from public.payment_claims where participant_id = v_part.id and idempotency_key = p_idempotency_key;
+  if v_existing is not null then
+    return v_existing;
+  end if;
+  select * into v_exp from public.shared_expenses where id = v_part.expense_id for update;
+  if v_exp.status <> 'open' then
+    raise exception 'APP:INVALID_STATE';
+  end if;
+  select v_part.share_minor - coalesce(sum(amount_minor), 0) into v_outstanding
+    from public.payment_claims where participant_id = v_part.id and status in ('reported', 'confirmed');
+  if p_amount_minor <= 0 or p_amount_minor > v_outstanding then
+    raise exception 'APP:VALIDATION';
+  end if;
+  insert into public.payment_claims (user_id, participant_id, amount_minor, reported_by, note, idempotency_key)
+  values (v_exp.user_id, v_part.id, p_amount_minor, 'guest', left(p_note, 300), p_idempotency_key)
+  returning id into v_id;
+  insert into public.expense_events (user_id, expense_id, participant_id, actor, action, version, metadata)
+  values (v_exp.user_id, v_exp.id, v_part.id, 'guest', 'payment_reported', v_exp.version, jsonb_build_object('amountMinor', p_amount_minor));
+  return v_id;
+end;
+$$;
+
+-- Guests may only execute the guest_* functions; the access helper is internal.
+revoke execute on function public.guest_participant(uuid) from public, anon, authenticated;
+revoke execute on function public.redeem_invite(text) from public, anon;
+revoke execute on function public.guest_get_share() from public, anon;
+revoke execute on function public.guest_respond(uuid, public.participant_response, integer, text) from public, anon;
+revoke execute on function public.guest_report_payment(uuid, bigint, text, text) from public, anon;
+revoke execute on function public.save_split(uuid, uuid, text, public.split_method, bigint, jsonb, text) from public, anon;
+
+-- ---------------------------------------------------------------------------
 -- updated_at triggers
 -- ---------------------------------------------------------------------------
 do $$
@@ -630,7 +1032,7 @@ declare
 begin
   foreach t in array array[
     'profiles', 'financial_accounts', 'categories', 'import_templates', 'imports', 'transactions',
-    'categorization_rules', 'merchant_map', 'refund_expectations', 'llm_configs', 'uploaded_files'
+    'categorization_rules', 'merchant_map', 'refund_expectations', 'llm_configs', 'uploaded_files', 'shared_expenses', 'expense_participants'
   ] loop
     execute format('create trigger set_updated_at before update on public.%I for each row execute function public.set_updated_at()', t);
   end loop;
@@ -654,7 +1056,8 @@ begin
   foreach t in array array[
     'financial_accounts', 'categories', 'import_templates', 'imports', 'raw_events', 'transactions',
     'transaction_sources', 'categorization_rules', 'merchant_map', 'review_items', 'refund_expectations',
-    'llm_configs', 'idempotency_keys'
+    'llm_configs', 'idempotency_keys', 'shared_expenses', 'expense_participants', 'share_invites', 'guest_access',
+    'payment_claims', 'expense_events'
   ] loop
     execute format('alter table public.%I enable row level security', t);
     execute format(

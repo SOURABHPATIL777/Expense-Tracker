@@ -58,6 +58,7 @@ export default function DashboardPage() {
           <div className={styles.kpis}>
             <StatCard label="Income" value={formatInr(t.incomeMinor)} tone="success" />
             <StatCard label="Refunds received" value={formatInr(t.refundsReceivedMinor)} tone="success" />
+            <StatCard label="Owed to you" value={formatInr(d.owedToYouMinor)} tone={d.owedToYouMinor ? "warning" : "neutral"} hint="Across open splits" />
             <StatCard
               label="Money expected back"
               value={formatInr(d.refunds.expectedMinor)}

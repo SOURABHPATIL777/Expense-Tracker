@@ -1,0 +1,10 @@
+.title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.muted {
+  color: var(--color-text-subtle);
+  font-size: var(--text-xs);
+}

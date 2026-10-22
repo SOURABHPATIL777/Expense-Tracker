@@ -7,6 +7,7 @@ import { ImportsRepository } from "@/backend/repositories/imports.repository";
 import { RefundsRepository } from "@/backend/repositories/refunds.repository";
 import { istDateRange, todayIst } from "@/backend/domain/period";
 import { reviewService } from "./review.service";
+import { splitsService } from "./splits.service";
 import type { CategoryTotalDto, OverviewDto, OverviewTotalsDto, ReportRange, SourceStatusDto } from "@/shared/schemas/reports";
 import type { SourceApp } from "@/shared/constants/enums";
 
@@ -89,14 +90,15 @@ export function reportsService(db: Db) {
     totals,
     categories,
     async overview(userId: string, range: ReportRange): Promise<OverviewDto> {
-      const [t, c, refunds, openReviewCount, s] = await Promise.all([
+      const [t, c, refunds, openReviewCount, s, owedToYouMinor] = await Promise.all([
         totals(range),
         categories(userId, range),
         refundsSummary(userId),
         reviewService(db).openCount(userId),
         sources(userId),
+        splitsService(db).owedToYou(userId),
       ]);
-      return { range, totals: t, categories: c, refunds, openReviewCount, sources: s };
+      return { range, totals: t, categories: c, refunds, owedToYouMinor, openReviewCount, sources: s };
     },
   };
 }

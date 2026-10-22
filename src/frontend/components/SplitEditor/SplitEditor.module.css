@@ -1,0 +1,41 @@
+.editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: var(--space-3);
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 1fr auto 6.5rem 2rem;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.value {
+  width: 6rem;
+}
+
+.share {
+  text-align: right;
+  font-size: var(--text-sm);
+}
+
+.hint {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
