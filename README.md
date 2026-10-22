@@ -82,12 +82,16 @@ Node 20.9+ is required; Node 22+ is recommended.
 4. Optional: add a lifecycle rule that deletes objects older than 7 days. This cleans up uploads that were started but never confirmed. Successful imports already delete their file.
 
 ### 3. Vercel
-1. Import the repo and set the variables from `.env.example`.
-2. **No cron is needed.** Background jobs run in the app itself:
+1. Import the GitHub repo. Framework: **Next.js**. Leave Root Directory empty and Output Directory unset.
+2. Set the variables from `.env.example` under Settings → Environment Variables (Production, and Preview if you use PR previews). `APP_URL` must be the Vercel domain.
+3. **Every push to `main` deploys to production automatically**; pull requests get preview URLs.
+4. **Schema changes:** apply migrations before (or as) you push code that needs them.
+   - Locally: `npm run db:push`.
+   - Or set `SUPABASE_PROJECT_ID` (variable) plus `SUPABASE_ACCESS_TOKEN` and `SUPABASE_DB_PASSWORD` (secrets) in a GitHub `production` environment. The CI workflow then applies pending migrations on every push to `main`.
+5. **No cron is needed.** Background jobs run in the app itself:
    - Uploads, column mappings and "re-apply rules" start the worker right after the response, via `after()`.
-   - Every signed-in API request also starts a short worker pass, at most once a minute per instance. This picks up retried or interrupted jobs.
-3. After deploying:
-   - check `GET /api/v1/health` returns `ok`.
+   - Every signed-in API request also starts a short worker pass, at most once a minute per instance, to pick up retried or interrupted jobs.
+6. After deploying, check `GET /api/v1/health` returns `ok`.
 
 ### 4. AI models (optional)
 - **Cloud providers:** set `OPENAI_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY` and/or `XAI_API_KEY`.
