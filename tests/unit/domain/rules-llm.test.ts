@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { firstMatchingRule, type Rule } from "@/backend/domain/rules";
 import { categorizeData, categorizeSchema } from "@/backend/llm/prompts/categorize";
 import { isCloudModel } from "@/backend/llm/registry";
@@ -63,6 +63,15 @@ describe("cloud consent", () => {
     [{ provider: "ollama", model: "glm-5.2:cloud" }, true],
   ] as const)("%o → %s", (ref, cloud) => {
     expect(isCloudModel(ref)).toBe(cloud);
+  });
+
+  it("treats endpoints hosted on ollama.com as cloud, whatever the model name", () => {
+    process.env.OLLAMA_ENDPOINTS = "local=http://localhost:11434/api,cloud=https://ollama.com/api";
+    vi.resetModules();
+    return import("@/backend/llm/registry").then(({ isCloudModel: fresh }) => {
+      expect(fresh({ provider: "ollama", model: "glm-5.2", endpointName: "cloud" })).toBe(true);
+      expect(fresh({ provider: "ollama", model: "qwen3.5:9b", endpointName: "local" })).toBe(false);
+    });
   });
 
   it("requires an endpoint name for Ollama configs", () => {

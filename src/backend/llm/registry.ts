@@ -11,8 +11,21 @@ import type { LlmProvider } from "@/backend/constants/enums.constants";
 
 export type ModelRef = { provider: LlmProvider; model: string; endpointName?: string | null };
 
-/** Ollama models tagged `:cloud` run on Ollama's hosted service, so they count as cloud processing. */
-export const isCloudModel = (ref: ModelRef) => CLOUD_PROVIDERS.includes(ref.provider) || (ref.provider === "ollama" && /:cloud$/i.test(ref.model));
+/** Hosts that are Ollama's own hosted service rather than a server you run. */
+const OLLAMA_CLOUD_HOST = /(^|\.)ollama\.com$/i;
+
+/**
+ * Whether data leaves infrastructure the operator controls, which requires the user's consent.
+ * For Ollama that's a `:cloud`-tagged model (routed to Ollama's cloud by the daemon) or any
+ * endpoint hosted on ollama.com.
+ */
+export function isCloudModel(ref: ModelRef): boolean {
+  if (CLOUD_PROVIDERS.includes(ref.provider)) return true;
+  if (ref.provider !== "ollama") return false;
+  if (/:cloud$/i.test(ref.model)) return true;
+  const url = ref.endpointName ? getEnv().OLLAMA_ENDPOINTS[ref.endpointName] : undefined;
+  return Boolean(url && OLLAMA_CLOUD_HOST.test(new URL(url).hostname));
+}
 
 /** Whether the server has what it needs (key or endpoint) to call this provider. */
 export function providerAvailable(provider: LlmProvider): boolean {

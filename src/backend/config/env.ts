@@ -42,7 +42,7 @@ const envSchema = z.object({
   R2_BUCKET: z.string().min(3).default("expense-statements"),
   /** Override for EU/FedRAMP jurisdictions, e.g. https://<account>.eu.r2.cloudflarestorage.com */
   R2_ENDPOINT: optionalSecret.pipe(z.url().optional()),
-  LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
+  LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
   OPENAI_API_KEY: optionalSecret,
   GOOGLE_GENERATIVE_AI_API_KEY: optionalSecret,
   XAI_API_KEY: optionalSecret,
