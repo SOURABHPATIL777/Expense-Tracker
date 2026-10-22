@@ -28,6 +28,10 @@ export const JOBS = {
   BACKOFF_MAX_SECONDS: 60 * 60,
   /** Worker stops claiming new jobs after this much wall-clock time to stay under the function limit. */
   WORKER_BUDGET_MS: 45_000,
+  /** Minimum gap between traffic-triggered worker passes on one server instance. */
+  OPPORTUNISTIC_INTERVAL_MS: 60_000,
+  /** Kept short so ordinary API calls don't hold their function open for long. */
+  OPPORTUNISTIC_BUDGET_MS: 15_000,
   IMPORT_ROWS_PER_STEP: 500,
   CLASSIFY_PER_STEP: 50,
   LLM_BATCH_SIZE: 20,

@@ -15,7 +15,7 @@ type ClaimedJob = { id: string; type: JobType; user_id: string; payload: unknown
  * Claims jobs with SKIP LOCKED and runs them until the time budget is spent. Safe to run
  * concurrently from several invocations (cron + post-upload triggers).
  */
-export async function runWorker({ budgetMs = JOBS.WORKER_BUDGET_MS } = {}): Promise<{ processed: number; failed: number }> {
+export async function runWorker({ budgetMs = JOBS.WORKER_BUDGET_MS }: { budgetMs?: number } = {}): Promise<{ processed: number; failed: number }> {
   const db = getAdminClient();
   const deadline = Date.now() + budgetMs;
   let processed = 0;
@@ -75,6 +75,18 @@ async function execute(db: Db, job: ClaimedJob): Promise<boolean> {
 }
 
 /** Starts a short worker pass after the current response is sent (no waiting for cron). */
-export function kickWorker(): void {
-  after(() => runWorker({ budgetMs: JOBS.WORKER_BUDGET_MS }).catch((err) => logger.error({ err }, "worker kick failed")));
+export function kickWorker(budgetMs: number = JOBS.WORKER_BUDGET_MS): void {
+  after(() => runWorker({ budgetMs }).catch((err) => logger.error({ err }, "worker kick failed")));
+}
+
+let lastOpportunisticKick = 0;
+
+/**
+ * The app's own scheduler (no external cron): normal user traffic sweeps up retried or
+ * interrupted jobs. Throttled per server instance; a pass with nothing ready costs one query.
+ */
+export function kickWorkerOpportunistically(now = Date.now()): void {
+  if (now - lastOpportunisticKick < JOBS.OPPORTUNISTIC_INTERVAL_MS) return;
+  lastOpportunisticKick = now;
+  kickWorker(JOBS.OPPORTUNISTIC_BUDGET_MS);
 }

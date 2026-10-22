@@ -11,6 +11,7 @@ import { assertAuth, readAuth, type AuthContext } from "./middleware/auth";
 import { assertSameOrigin } from "./middleware/origin";
 import { assertCronSecret } from "./middleware/cronAuth";
 import { clientIp, enforceRateLimit } from "./middleware/rateLimit";
+import { kickWorkerOpportunistically } from "@/backend/jobs/worker";
 import type { ApiFailure, ApiSuccess, PageMeta } from "@/shared/schemas/common";
 
 type Infer<S> = S extends ZodType ? z.infer<S> : undefined;
@@ -86,6 +87,8 @@ export function withHandler<
       const body = options.body ? parseOrThrow(options.body, await readJson(req)) : undefined;
 
       const result = await handler({ req, requestId, log, db, auth, body, query, params } as HandlerContext<B, Q, P, M>);
+      // Signed-in traffic doubles as the job scheduler (see kickWorkerOpportunistically).
+      if (options.auth === AUTH_MODES.USER) kickWorkerOpportunistically();
       const response = toResponse(result, requestId, extraHeaders);
       log.info({ status: response.status, ms: Math.round(performance.now() - started), userId: auth?.userId }, "request");
       return response;

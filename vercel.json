@@ -4,11 +4,5 @@
     "deploymentEnabled": {
       "main": false
     }
-  },
-  "crons": [
-    {
-      "path": "/api/v1/jobs/run",
-      "schedule": "0 2 * * *"
-    }
-  ]
+  }
 }
