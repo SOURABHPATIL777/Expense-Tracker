@@ -1,0 +1,47 @@
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.label {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+
+.input {
+  composes: control from "../../styles/controls.module.css";
+}
+
+.textarea {
+  composes: control from "../../styles/controls.module.css";
+  height: auto;
+  min-height: 5rem;
+  padding: var(--space-2) var(--space-3);
+  resize: vertical;
+}
+
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.checkbox input {
+  width: 1rem;
+  height: 1rem;
+  accent-color: var(--color-accent);
+}
+
+.hint {
+  color: var(--color-text-subtle);
+  font-size: var(--text-xs);
+}
+
+.error {
+  color: var(--color-danger);
+  font-size: var(--text-xs);
+}

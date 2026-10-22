@@ -1,0 +1,20 @@
+.money {
+  white-space: nowrap;
+}
+
+.debit {
+  color: var(--color-debit);
+}
+
+.credit {
+  color: var(--color-credit);
+}
+
+.muted {
+  color: var(--color-text-subtle);
+  text-decoration: line-through;
+}
+
+.strong {
+  font-weight: var(--weight-semibold);
+}

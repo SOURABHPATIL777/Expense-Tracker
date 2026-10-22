@@ -1,0 +1,54 @@
+{
+  "name": "upi-spend-tracker",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint && jscpd src",
+    "typecheck": "next typegen && tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check": "npm run lint && npm run typecheck && npm test",
+    "db:link": "supabase link",
+    "db:push": "supabase db push",
+    "db:types": "supabase gen types typescript --linked > src/backend/supabase/database.types.ts",
+    "rls:check": "tsx scripts/rls-check.ts"
+  },
+  "dependencies": {
+    "@ai-sdk/google": "^3.0.137",
+    "@ai-sdk/openai": "^3.0.131",
+    "@ai-sdk/xai": "^3.0.145",
+    "@supabase/ssr": "^0.12.7",
+    "@supabase/supabase-js": "^2.118.0",
+    "ai": "^6.0.312",
+    "next": "16.4.2",
+    "node-html-parser": "^9.0.5",
+    "ollama-ai-provider-v2": "^3.6.0",
+    "papaparse": "^5.7.0",
+    "pino": "^10.4.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "server-only": "^0.0.1",
+    "unpdf": "^1.7.0",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/papaparse": "^5.5.2",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.4.2",
+    "jscpd": "^5.4.2",
+    "supabase": "^2.121.0",
+    "tsx": "^4.23.15",
+    "typescript": "^5",
+    "vitest": "^4.1.12"
+  }
+}
