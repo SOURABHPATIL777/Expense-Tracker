@@ -1,12 +1,13 @@
 /**
- * Row-level-security smoke test against the REAL Supabase project in .env.local.
+ * Row-level-security smoke test against the REAL Supabase project in .env.local (or .env).
  * Creates two throwaway users and one anonymous guest, checks isolation, then deletes them.
  *   npm run rls:check
  */
 import { randomBytes } from "node:crypto";
+import { existsSync } from "node:fs";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-process.loadEnvFile?.(".env.local");
+for (const file of [".env.local", ".env"]) if (existsSync(file)) process.loadEnvFile?.(file);
 const url = process.env.SUPABASE_URL;
 const publishable = process.env.SUPABASE_PUBLISHABLE_KEY;
 const secret = process.env.SUPABASE_SECRET_KEY;
