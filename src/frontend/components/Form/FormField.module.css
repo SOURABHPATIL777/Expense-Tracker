@@ -14,6 +14,16 @@
   composes: control from "../../styles/controls.module.css";
 }
 
+.color {
+  width: 3.5rem;
+  height: var(--control-height);
+  padding: 2px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  cursor: pointer;
+}
+
 .textarea {
   composes: control from "../../styles/controls.module.css";
   height: auto;

@@ -47,4 +47,4 @@ export const REPORTS = {
 } as const;
 
 /** Jobs enqueued (with `{ importId }`) once an import finishes processing. */
-export const AFTER_IMPORT_JOBS: readonly JobType[] = [];
+export const AFTER_IMPORT_JOBS: readonly JobType[] = ["classify_transactions"];

@@ -530,6 +530,49 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
+-- Merge a confirmed duplicate into the transaction it duplicates (user-initiated only).
+-- Sources and raw rows move to the kept transaction; identifiers it lacked are copied over.
+-- ---------------------------------------------------------------------------
+create or replace function public.merge_transactions(p_keep uuid, p_remove uuid)
+returns void
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_keep public.transactions;
+  v_remove public.transactions;
+begin
+  select * into v_keep from public.transactions where id = p_keep and user_id = auth.uid() for update;
+  select * into v_remove from public.transactions where id = p_remove and user_id = auth.uid() for update;
+  if v_keep.id is null or v_remove.id is null then
+    raise exception 'APP:NOT_FOUND';
+  end if;
+  if p_keep = p_remove or v_keep.amount_minor <> v_remove.amount_minor or v_keep.direction <> v_remove.direction then
+    raise exception 'APP:INVALID_STATE';
+  end if;
+
+  update public.transaction_sources set transaction_id = p_keep where transaction_id = p_remove;
+  update public.raw_events set transaction_id = p_keep, status = 'linked' where transaction_id = p_remove;
+  update public.review_items
+     set status = 'resolved', resolved_at = now(), resolution = 'merged'
+   where status = 'open' and (transaction_id = p_remove or related_transaction_id = p_remove);
+  delete from public.transactions where id = p_remove;
+
+  update public.transactions t
+     set reference_id = coalesce(t.reference_id, v_remove.reference_id),
+         app_transaction_id = coalesce(t.app_transaction_id, v_remove.app_transaction_id),
+         counterparty_vpa = coalesce(t.counterparty_vpa, v_remove.counterparty_vpa),
+         merchant_normalized = coalesce(t.merchant_normalized, v_remove.merchant_normalized),
+         review_status = 'ok',
+         reconciliation = case
+           when (select count(distinct s.source_kind) from public.transaction_sources s where s.transaction_id = p_keep) > 1
+           then 'reconciled'::public.reconciliation_state else t.reconciliation end
+   where t.id = p_keep;
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
 -- updated_at triggers
 -- ---------------------------------------------------------------------------
 do $$

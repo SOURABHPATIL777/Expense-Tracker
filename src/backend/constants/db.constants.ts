@@ -40,6 +40,7 @@ export const RPC = {
   OWNER_RESOLVE_CLAIM: "owner_resolve_claim",
   SAVE_SPLIT: "save_split",
   DELETE_IMPORT: "delete_import",
+  MERGE_TRANSACTIONS: "merge_transactions",
 } as const;
 
 export const PG_ERROR = {

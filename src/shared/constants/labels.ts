@@ -6,6 +6,8 @@ import type {
   ParticipantResponse,
   RefundStatus,
   ReviewItemKind,
+  RuleField,
+  RuleOperator,
   SharedExpenseStatus,
   SourceApp,
   TransactionKind,
@@ -113,4 +115,16 @@ export const LLM_TASK_LABELS: Record<LlmTask, string> = {
   categorize: "Categorise transactions",
   monthly_summary: "Monthly summary",
   refund_message: "Refund support message",
+};
+
+export const RULE_FIELD_LABELS: Record<RuleField, string> = {
+  merchant: "Merchant name",
+  vpa: "UPI ID",
+  narration: "Statement description",
+};
+
+export const RULE_OPERATOR_LABELS: Record<RuleOperator, string> = {
+  contains: "contains",
+  equals: "is exactly",
+  starts_with: "starts with",
 };

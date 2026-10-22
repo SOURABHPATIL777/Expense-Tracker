@@ -9,8 +9,12 @@ type FieldProps = {
   name: string;
   label: string;
   hint?: string;
-  type?: "text" | "email" | "password" | "number" | "date" | "datetime-local" | "textarea" | "select" | "checkbox";
+  type?: "text" | "email" | "password" | "number" | "date" | "datetime-local" | "color" | "textarea" | "select" | "checkbox";
   options?: readonly Option[];
+  /** Free-text input with suggestions (rendered as a <datalist>). */
+  suggestions?: readonly string[];
+  /** Observe changes without making the field controlled (e.g. to show dependent fields). */
+  onValueChange?: (value: string) => void;
   placeholder?: string;
   defaultValue?: string | number;
   defaultChecked?: boolean;
@@ -23,11 +27,17 @@ type FieldProps = {
 };
 
 /** Label + control + hint + error, wired to the enclosing <Form>. */
-export function FormField({ name, label, hint, type = "text", options = [], placeholder, defaultValue, defaultChecked, ...rest }: FieldProps) {
+export function FormField({ name, label, hint, type = "text", options = [], suggestions, placeholder, defaultValue, defaultChecked, onValueChange, ...rest }: FieldProps) {
   const id = useId();
   const error = useFieldError(name);
   const describedBy = error ? `${id}-error` : hint ? `${id}-hint` : undefined;
-  const common = { id, name, "aria-invalid": Boolean(error), "aria-describedby": describedBy };
+  const common = {
+    id,
+    name,
+    "aria-invalid": Boolean(error),
+    "aria-describedby": describedBy,
+    onChange: onValueChange ? (e: { target: { value: string } }) => onValueChange(e.target.value) : undefined,
+  };
 
   if (type === "checkbox") {
     return (
@@ -54,7 +64,24 @@ export function FormField({ name, label, hint, type = "text", options = [], plac
       ) : type === "textarea" ? (
         <textarea {...common} className={styles.textarea} placeholder={placeholder} defaultValue={defaultValue} rows={3} />
       ) : (
-        <input {...common} {...rest} type={type} className={styles.input} placeholder={placeholder} defaultValue={defaultValue} />
+        <>
+          <input
+            {...common}
+            {...rest}
+            type={type}
+            className={type === "color" ? styles.color : styles.input}
+            placeholder={placeholder}
+            defaultValue={defaultValue}
+            list={suggestions ? `${id}-list` : undefined}
+          />
+          {suggestions && (
+            <datalist id={`${id}-list`}>
+              {suggestions.map((s) => (
+                <option key={s} value={s} />
+              ))}
+            </datalist>
+          )}
+        </>
       )}
       {hint && !error && <span id={`${id}-hint`} className={styles.hint}>{hint}</span>}
       {error && <span id={`${id}-error`} className={styles.error}>{error}</span>}

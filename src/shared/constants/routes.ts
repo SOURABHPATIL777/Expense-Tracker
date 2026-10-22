@@ -27,6 +27,7 @@ export const API_ROUTES = {
   category: (id: string) => `${API_BASE}/categories/${id}`,
   rules: `${API_BASE}/rules`,
   rule: (id: string) => `${API_BASE}/rules/${id}`,
+  rulesApply: `${API_BASE}/rules/apply`,
   reviewItems: `${API_BASE}/review-items`,
   reviewItem: (id: string) => `${API_BASE}/review-items/${id}`,
   refunds: `${API_BASE}/refunds`,
