@@ -1,6 +1,6 @@
-# CI: every PR and push is checked. Deployments are done by Vercel's Git integration
-# (every push to main goes to production, PRs get previews).
-# On main, pending database migrations are applied once the Supabase secrets are configured.
+# CI/CD: every PR and push is checked; pushes to main then migrate the database and deploy to
+# Vercel production, in that order, so the app never goes live ahead of the schema it needs.
+# PR preview deployments are still created by Vercel's Git integration.
 name: Pipeline
 
 on:
@@ -37,8 +37,7 @@ jobs:
 
   migrate:
     name: Apply database migrations
-    # Skipped until SUPABASE_PROJECT_ID (and the two secrets) are set in the production environment.
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.SUPABASE_PROJECT_ID != ''
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: check
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -55,3 +54,33 @@ jobs:
       - run: supabase link --project-ref "$SUPABASE_PROJECT_ID"
       # Applies only migrations not yet recorded in the remote history; a no-op otherwise.
       - run: supabase db push --include-all
+
+  deploy:
+    name: Deploy to Vercel production
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: migrate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # Pulls the production env vars configured in the Vercel dashboard, then builds and ships the exact artifact.
+      - run: npx vercel@65 pull --yes --environment=production --token="$VERCEL_TOKEN"
+      - run: npx vercel@65 build --prod --token="$VERCEL_TOKEN"
+      - id: ship
+        run: echo "url=$(npx vercel@65 deploy --prebuilt --prod --token="$VERCEL_TOKEN")" >> "$GITHUB_OUTPUT"
+      - name: Smoke test
+        # Uses the public production domain: per-deployment URLs sit behind Vercel Deployment Protection.
+        env:
+          BASE_URL: ${{ vars.PRODUCTION_URL || steps.ship.outputs.url }}
+        run: |
+          curl --fail --silent --show-error --retry 5 --retry-delay 5 "$BASE_URL/api/v1/health"
