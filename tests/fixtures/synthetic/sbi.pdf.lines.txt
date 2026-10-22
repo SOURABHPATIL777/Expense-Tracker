@@ -1,0 +1,8 @@
+State Bank of India
+Statement of Account
+Txn Date Value Date Description Ref No./Cheque No. Debit Credit Balance
+Opening Balance 12,350.00
+5 Oct 2024 5 Oct 2024 TO TRANSFER-UPI/DR/427912345678/SWIGGY/YESB/swiggy@ybl/UPI 350.00 12,000.00
+6 Oct 2024 6 Oct 2024 BY TRANSFER-UPI/CR/427998765432/RAHUL SHARMA/HDFC/rahul.s@okhdfcbank/Dinner 500.00 12,500.00
+7 Oct 2024 7 Oct 2024 ATM WDL 2,000.00 10,500.00
+Page 1 of 1

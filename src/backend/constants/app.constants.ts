@@ -1,4 +1,5 @@
 import "server-only";
+import type { JobType } from "@/shared/constants/enums";
 
 export { PAGINATION, UPLOAD, SPLIT, TEXT, CURRENCY } from "@/shared/constants/limits";
 
@@ -44,3 +45,6 @@ export const REPORTS = {
   MAX_RANGE_DAYS: 366,
   TOP_CATEGORIES: 8,
 } as const;
+
+/** Jobs enqueued (with `{ importId }`) once an import finishes processing. */
+export const AFTER_IMPORT_JOBS: readonly JobType[] = [];

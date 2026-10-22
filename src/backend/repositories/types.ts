@@ -67,6 +67,7 @@ export type ImportRow = Timestamps & {
   status: ImportStatus;
   preset_id: string | null;
   template_id: string | null;
+  config: unknown;
   error_code: string | null;
   error_message: string | null;
   row_count: number;
@@ -82,6 +83,17 @@ export type ImportRow = Timestamps & {
 };
 
 export type RawEventStatus = "pending" | "accepted" | "linked" | "duplicate" | "skipped" | "rejected";
+
+export type TransactionSourceRow = {
+  id: string;
+  user_id: string;
+  transaction_id: string;
+  raw_event_id: string;
+  import_id: string;
+  source_kind: SourceKind;
+  source_app: string;
+  created_at: string;
+};
 
 export type RawEventRow = {
   id: string;

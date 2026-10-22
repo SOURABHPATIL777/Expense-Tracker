@@ -19,6 +19,7 @@ export const API_ROUTES = {
   importMapping: (id: string) => `${API_BASE}/imports/${id}/mapping`,
   importPassword: (id: string) => `${API_BASE}/imports/${id}/password`,
   importPreview: (id: string) => `${API_BASE}/imports/${id}/preview`,
+  importRows: (id: string) => `${API_BASE}/imports/${id}/rows`,
   importTemplates: `${API_BASE}/import-templates`,
   transactions: `${API_BASE}/transactions`,
   transaction: (id: string) => `${API_BASE}/transactions/${id}`,

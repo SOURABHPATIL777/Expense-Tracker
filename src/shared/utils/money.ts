@@ -25,7 +25,7 @@ export function parseAmountToMinor(raw: string | number | null | undefined): num
   }
   const cleaned = raw
     .replace(/₹|rs\.?|inr/gi, "")
-    .replace(/\b(dr|cr)\b\.?/gi, "")
+    .replace(/\(?(?<![a-z])(dr|cr)\b\.?\)?/gi, "")
     .replace(/[,\s]/g, "")
     .replace(/^\((.*)\)$/, "-$1");
   if (!/^[-+]?\d+(\.\d{1,2})?$/.test(cleaned)) return null;

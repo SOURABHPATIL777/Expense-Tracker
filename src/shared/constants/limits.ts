@@ -5,17 +5,9 @@ export const PAGINATION = {
   MAX_PAGE_SIZE: 100,
 } as const;
 
+/** Accepted formats per source live in ./sources.ts (SOURCE_CONFIG). */
 export const UPLOAD = {
   MAX_FILE_BYTES: 10 * 1024 * 1024,
-  ACCEPTED_EXTENSIONS: [".csv", ".xls", ".xlsx", ".pdf", ".html", ".json"],
-  ACCEPTED_MIME_TYPES: [
-    "text/csv",
-    "application/vnd.ms-excel",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    "application/pdf",
-    "text/html",
-    "application/json",
-  ],
 } as const;
 
 export const SPLIT = {

@@ -7,12 +7,10 @@ import { AppError, unwrapMaybe } from "@/backend/errors/AppError";
 
 const keySchema = z.string().min(8).max(128).regex(/^[\w-]+$/);
 
-export function readIdempotencyKey(req: Request, required = true): string | null {
+/** Reads the required `Idempotency-Key` header sent by apiClient on retry-sensitive writes. */
+export function readIdempotencyKey(req: Request): string {
   const raw = req.headers.get(HEADERS.IDEMPOTENCY_KEY);
-  if (!raw) {
-    if (required) throw new AppError("VALIDATION", { message: "Idempotency-Key header is required." });
-    return null;
-  }
+  if (!raw) throw new AppError("VALIDATION", { message: "Idempotency-Key header is required." });
   const parsed = keySchema.safeParse(raw);
   if (!parsed.success) throw new AppError("VALIDATION", { message: "Idempotency-Key header is malformed." });
   return parsed.data;

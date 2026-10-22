@@ -178,6 +178,8 @@ create table public.imports (
   status public.import_status not null default 'uploaded',
   preset_id text,
   template_id uuid references public.import_templates (id) on delete set null,
+  -- Column mapping chosen by the user for files no preset recognises.
+  config jsonb,
   error_code text,
   error_message text,
   row_count integer not null default 0,
@@ -472,6 +474,37 @@ $$;
 revoke execute on function public.rate_limit_hit(text, integer, integer) from public, anon, authenticated;
 
 -- ---------------------------------------------------------------------------
+-- Import deletion: removes the import, its rows, and transactions that came only from it.
+-- Transactions also seen in another import keep their other sources.
+-- ---------------------------------------------------------------------------
+create or replace function public.delete_import(p_import_id uuid)
+returns void
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+begin
+  delete from public.transactions t
+   where t.user_id = auth.uid()
+     and exists (select 1 from public.transaction_sources s where s.transaction_id = t.id and s.import_id = p_import_id)
+     and not exists (select 1 from public.transaction_sources s where s.transaction_id = t.id and s.import_id <> p_import_id);
+
+  update public.transactions t
+     set reconciliation = 'single_source'
+   where t.user_id = auth.uid()
+     and t.reconciliation = 'reconciled'
+     and (select count(distinct s.source_kind) from public.transaction_sources s
+           where s.transaction_id = t.id and s.import_id <> p_import_id) < 2
+     and exists (select 1 from public.transaction_sources s where s.transaction_id = t.id and s.import_id = p_import_id);
+
+  delete from public.imports where id = p_import_id and user_id = auth.uid();
+  if not found then
+    raise exception 'APP:NOT_FOUND';
+  end if;
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
 -- updated_at triggers
 -- ---------------------------------------------------------------------------
 do $$
@@ -544,9 +577,10 @@ revoke all on all tables in schema public from anon;
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values (
   'statements', 'statements', false, 10485760,
+  -- Mirrors FILE_FORMATS in src/shared/constants/sources.ts (CSV, Excel, PDF).
   array[
-    'text/csv', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    'application/pdf', 'text/html', 'application/json', 'application/octet-stream', 'text/plain'
+    'text/csv', 'application/csv', 'text/plain', 'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/pdf', 'application/octet-stream'
   ]
 )
 on conflict (id) do nothing;
@@ -573,4 +607,17 @@ create policy statements_owner_delete on storage.objects
     bucket_id = 'statements'
     and (storage.foldername(name))[1] = (select auth.uid())::text
     and (select public.is_permanent_user())
+  );
+
+-- Retried uploads overwrite the pending object (signed upload URL with upsert).
+create policy statements_owner_update on storage.objects
+  for update to authenticated
+  using (
+    bucket_id = 'statements'
+    and (storage.foldername(name))[1] = (select auth.uid())::text
+    and (select public.is_permanent_user())
+  )
+  with check (
+    bucket_id = 'statements'
+    and (storage.foldername(name))[1] = (select auth.uid())::text
   );

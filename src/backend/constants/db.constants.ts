@@ -38,6 +38,7 @@ export const RPC = {
   GUEST_REPORT_PAYMENT: "guest_report_payment",
   OWNER_RESOLVE_CLAIM: "owner_resolve_claim",
   SAVE_SPLIT: "save_split",
+  DELETE_IMPORT: "delete_import",
 } as const;
 
 export const BUCKETS = {

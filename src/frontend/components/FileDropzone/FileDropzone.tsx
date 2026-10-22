@@ -3,6 +3,7 @@
 import { useId, useState, type DragEvent } from "react";
 import { cx } from "@/frontend/lib/cx";
 import { UPLOAD } from "@/shared/constants/limits";
+import { acceptedExtensions } from "@/shared/constants/sources";
 import styles from "./FileDropzone.module.css";
 
 type FileDropzoneProps = {
@@ -13,7 +14,7 @@ type FileDropzoneProps = {
   hint?: string;
 };
 
-export function FileDropzone({ onFile, disabled, accept = UPLOAD.ACCEPTED_EXTENSIONS, maxBytes = UPLOAD.MAX_FILE_BYTES, hint }: FileDropzoneProps) {
+export function FileDropzone({ onFile, disabled, accept = acceptedExtensions(), maxBytes = UPLOAD.MAX_FILE_BYTES, hint }: FileDropzoneProps) {
   const id = useId();
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string>();

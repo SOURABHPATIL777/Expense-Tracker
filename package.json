@@ -27,7 +27,6 @@
     "@supabase/supabase-js": "^2.118.0",
     "ai": "^6.0.312",
     "next": "16.4.2",
-    "node-html-parser": "^9.0.5",
     "ollama-ai-provider-v2": "^3.6.0",
     "papaparse": "^5.7.0",
     "pino": "^10.4.0",

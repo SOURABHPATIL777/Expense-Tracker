@@ -1,0 +1,13 @@
+Transaction Statement for 98XXXXXX10
+Oct 01, 2024 - Oct 31, 2024
+Date Transaction Details Type Amount
+Oct 05, 2024 Paid to Swiggy DEBIT ₹350
+10:32 am Transaction ID T2410051032123456789
+UTR No. 427912345678
+Paid by XXXXXXXX1234
+Oct 06, 2024 Received from Rahul Sharma CREDIT ₹500
+08:05 pm Transaction ID T2410062005987654321
+UTR No. 427998765432
+Credited to XXXXXXXX1234
+Page 1 of 1
+This is a system generated statement. PhonePe Private Limited.
