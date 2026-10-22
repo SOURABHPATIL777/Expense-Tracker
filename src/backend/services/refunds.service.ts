@@ -143,7 +143,7 @@ export function refundsService(db: Db) {
       const r = await refunds.findById(userId, id);
       const tx = await transactions.findById(userId, r.transaction_id);
       const schema = z.object({ message: z.string().min(1).max(1500) });
-      const out = await runLlmTask(db, {
+      const out = await runLlmTask({
         userId,
         task: "refund_message",
         schema,

@@ -8,8 +8,6 @@ import type {
   SplitMethod,
   Direction,
   ImportStatus,
-  LlmProvider,
-  LlmTask,
   ReconciliationState,
   RefundStatus,
   ReviewItemKind,
@@ -49,30 +47,23 @@ export type CategoryRow = Timestamps & {
   is_system: boolean;
 };
 
-export type ImportTemplateRow = Timestamps & {
-  id: string;
-  user_id: string;
-  name: string;
-  source_kind: SourceKind;
-  source_app: string;
-  header_signature: string;
-  config: unknown;
-};
 
 export type ImportRow = Timestamps & {
   id: string;
   user_id: string;
   account_id: string | null;
-  source_kind: SourceKind;
-  source_app: string;
+  source_kind: SourceKind | null;
+  source_app: string | null;
   file_name: string;
   file_path: string;
   file_size: number;
   file_sha256: string;
   status: ImportStatus;
   preset_id: string | null;
-  template_id: string | null;
-  config: unknown;
+  layout_id: string | null;
+  extracted_text: string[] | null;
+  detected_label: string | null;
+  read_by_ai: boolean;
   error_code: string | null;
   error_message: string | null;
   row_count: number;
@@ -168,14 +159,6 @@ export type RuleRow = Timestamps & {
   is_active: boolean;
 };
 
-export type MerchantMapRow = Timestamps & {
-  id: string;
-  user_id: string;
-  merchant_key: string;
-  merchant_name: string | null;
-  category_id: string;
-  transaction_kind: TransactionKind | null;
-};
 
 export type ReviewItemRow = {
   id: string;
@@ -205,21 +188,6 @@ export type RefundRow = Timestamps & {
   resolved_at: string | null;
 };
 
-export type LlmConfigRow = Timestamps & {
-  id: string;
-  user_id: string;
-  task: LlmTask;
-  enabled: boolean;
-  provider: LlmProvider;
-  model: string;
-  endpoint_name: string | null;
-  temperature: number;
-  max_output_tokens: number;
-  timeout_ms: number;
-  allow_cloud_processing: boolean;
-  last_tested_at: string | null;
-  test_result: unknown;
-};
 
 export type SharedExpenseRow = Timestamps & {
   id: string;
@@ -292,4 +260,34 @@ export type ExpenseEventRow = {
   version: number;
   metadata: Record<string, unknown>;
   created_at: string;
+};
+
+export type ImportLayoutKind = "table" | "text" | "llm_extract";
+
+/** Shared (not per-user) statement layout: how to read one bank's/app's export. */
+export type ImportLayoutRow = {
+  id: string;
+  kind: ImportLayoutKind;
+  signature: string;
+  label: string;
+  source_kind: SourceKind;
+  source_app: string;
+  config: unknown;
+  origin: "seed" | "llm";
+  priority: number;
+  verified: boolean;
+  use_count: number;
+  last_used_at: string | null;
+  created_at: string;
+};
+
+/** Keyword → category. user_id null = shared (seed/LLM); set = that user's own correction. */
+export type CategoryMapRow = Timestamps & {
+  id: string;
+  user_id: string | null;
+  keyword: string;
+  category_name: string;
+  transaction_kind: TransactionKind | null;
+  origin: "seed" | "llm" | "user";
+  use_count: number;
 };

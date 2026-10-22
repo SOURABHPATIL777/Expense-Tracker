@@ -31,7 +31,6 @@ export const NAV_SECTIONS: NavSection[] = [
     title: "Settings",
     items: [
       { href: PAGE_ROUTES.settingsAccounts, label: "Accounts & UPI IDs" },
-      { href: PAGE_ROUTES.settingsAi, label: "AI models" },
     ],
   },
 ];

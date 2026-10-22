@@ -1,8 +1,6 @@
 import type {
   ClaimStatus,
   ImportStatus,
-  LlmProvider,
-  LlmTask,
   ParticipantResponse,
   RefundStatus,
   ReviewItemKind,
@@ -104,18 +102,7 @@ export const SOURCE_APP_LABELS: Record<SourceApp, string> = {
   other_bank: "Other bank",
 };
 
-export const LLM_PROVIDER_LABELS: Record<LlmProvider, string> = {
-  openai: "OpenAI (GPT)",
-  google: "Google (Gemini)",
-  xai: "xAI (Grok)",
-  ollama: "Ollama (self-hosted)",
-};
 
-export const LLM_TASK_LABELS: Record<LlmTask, string> = {
-  categorize: "Categorise transactions",
-  monthly_summary: "Monthly summary",
-  refund_message: "Refund support message",
-};
 
 export const RULE_FIELD_LABELS: Record<RuleField, string> = {
   merchant: "Merchant name",

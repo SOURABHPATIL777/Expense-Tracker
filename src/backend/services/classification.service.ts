@@ -1,22 +1,27 @@
 import "server-only";
 import type { Db } from "@/backend/supabase/clients";
 import type { Logger } from "@/backend/logger/logger";
-import { AppError, unwrap } from "@/backend/errors/AppError";
+import { unwrap } from "@/backend/errors/AppError";
 import { JOBS } from "@/backend/constants/app.constants";
 import { LLM_CONFIDENCE_THRESHOLD } from "@/backend/constants/llm.constants";
 import type { TransactionKind } from "@/backend/constants/enums.constants";
 import { TABLES } from "@/backend/constants/db.constants";
-import { CategoriesRepository, MerchantMapRepository, RulesRepository } from "@/backend/repositories/categorization.repository";
+import { CategoriesRepository, RulesRepository } from "@/backend/repositories/categorization.repository";
+import { CategoryMapRepository } from "@/backend/repositories/categoryMap.repository";
 import { TransactionsRepository } from "@/backend/repositories/transactions.repository";
 import { ReviewItemsRepository, type NewReviewItem } from "@/backend/repositories/reviewItems.repository";
 import type { CategoryRow, RuleRow, TransactionRow } from "@/backend/repositories/types";
 import { firstMatchingRule, type Rule } from "@/backend/domain/rules";
-import { merchantKey } from "@/backend/domain/merchant";
-import { resolveTaskConfig, runLlmTask } from "@/backend/llm/run";
+import { keywordAppearsIn, matchCategory, normalizeKeyword } from "@/backend/domain/categoryMap";
+import { looksLikeIndividual } from "@/backend/domain/individual";
+import { llmTaskEnabled, runLlmTask } from "@/backend/llm/run";
 import { CATEGORIZE_INSTRUCTIONS, categorizeData, categorizeSchema } from "@/backend/llm/prompts/categorize";
 
-/** Decided from the statement itself at import time; rules may override, the LLM may not. */
+/** Decided from the statement itself at import time; rules may override, the map and LLM may not. */
 const DETERMINISTIC_KINDS = new Set<TransactionKind>(["self_transfer", "refund", "reversal", "cc_bill_payment"]);
+
+/** Name of the default category for person-to-person payments (seeded for every user). */
+export const INDIVIDUAL_CATEGORY = "Individual";
 
 export type ClassifyScope = { scope: "import"; importId: string; cursor?: string } | { scope: "all"; cursor?: string };
 
@@ -32,6 +37,14 @@ const toRule = (r: RuleRow): Rule => ({
   priority: r.priority,
 });
 
+/** The text a keyword can match: merchant, raw merchant, narration and UPI handle. */
+export const matchTexts = (t: Pick<TransactionRow, "merchant_normalized" | "merchant_raw" | "narration" | "counterparty_vpa">) => [
+  t.merchant_normalized,
+  t.merchant_raw,
+  t.narration,
+  t.counterparty_vpa,
+];
+
 /** Debits default to spending; credits stay `unknown` (a friend repaying is not income) until decided. */
 const defaultKind = (t: TransactionRow): TransactionKind =>
   t.transaction_kind !== "unknown" ? t.transaction_kind : t.direction === "debit" ? "expense" : "unknown";
@@ -45,11 +58,18 @@ function kindFor(t: TransactionRow, category: CategoryRow | undefined, explicit?
   return hint;
 }
 
+/**
+ * Classification order for every unlocked transaction:
+ *   your rules → own transfers/refunds/card bills from the statement → category map (your own
+ *   choices first, then the longest shared keyword) → person-to-person ("Individual") → LLM.
+ * The LLM only sees what's still uncategorised, and each keyword it uses (verified to be in the
+ * text) is saved to the shared map so the next occurrence needs no LLM call.
+ */
 export function classificationService(db: Db, log: Logger) {
   const transactions = new TransactionsRepository(db);
   const categoriesRepo = new CategoriesRepository(db);
   const rulesRepo = new RulesRepository(db);
-  const merchantMap = new MerchantMapRepository(db);
+  const categoryMap = new CategoryMapRepository(db);
   const reviews = new ReviewItemsRepository(db);
 
   /** Next keyset page of transactions to classify for a scope. */
@@ -75,20 +95,16 @@ export function classificationService(db: Db, log: Logger) {
   }
 
   async function llmPass(userId: string, pending: TransactionRow[], categories: CategoryRow[], patches: Map<string, Patch>, reviewItems: NewReviewItem[]) {
-    try {
-      await resolveTaskConfig(db, userId, "categorize");
-    } catch (err) {
-      if (err instanceof AppError && err.code === "LLM_DISABLED") return; // AI categorisation is opt-in
-      throw err;
-    }
+    if (!llmTaskEnabled("categorize") || categories.length === 0) return;
     const names = categories.map((c) => c.name);
-    if (names.length === 0) return;
     const schema = categorizeSchema(names as [string, ...string[]]);
     const byName = new Map(categories.map((c) => [c.name, c]));
+    const individual = byName.get(INDIVIDUAL_CATEGORY);
+    const learned = new Map<string, { keyword: string; categoryName: string; transactionKind: TransactionKind | null }>();
 
     for (let i = 0; i < pending.length; i += JOBS.LLM_BATCH_SIZE) {
       const batch = pending.slice(i, i + JOBS.LLM_BATCH_SIZE);
-      const out = await runLlmTask(db, {
+      const out = await runLlmTask({
         userId,
         task: "categorize",
         schema,
@@ -108,20 +124,28 @@ export function classificationService(db: Db, log: Logger) {
       for (const item of out.items) {
         const t = batch[item.index];
         if (!t) continue; // the model referenced an index we never sent
-        const category = item.category ? byName.get(item.category) : undefined;
+        const category = item.isIndividual ? individual : item.category ? byName.get(item.category) : undefined;
         const lowConfidence = item.confidence < LLM_CONFIDENCE_THRESHOLD;
+        const explicitKind = item.kind === "unknown" || item.isIndividual ? null : item.kind;
         patches.set(t.id, {
           category_id: category?.id ?? null,
           category_source: category ? "llm" : null,
           category_confidence: item.confidence,
-          transaction_kind: kindFor(t, category, item.kind === "unknown" ? null : item.kind),
+          transaction_kind: kindFor(t, category, explicitKind),
           review_status: lowConfidence ? "needs_review" : t.review_status,
         });
         if (lowConfidence) {
           reviewItems.push({ kind: "low_confidence_category", transaction_id: t.id, payload: { suggestedCategoryId: category?.id ?? null, confidence: item.confidence } });
+          continue;
+        }
+        // Only a confident, business keyword that really appears in the text is shared with everyone.
+        const keyword = normalizeKeyword(item.keyword);
+        if (!item.isIndividual && category && keyword && keywordAppearsIn(matchTexts(t), keyword)) {
+          learned.set(keyword, { keyword, categoryName: category.name, transactionKind: explicitKind });
         }
       }
     }
+    if (learned.size) log.info({ added: await categoryMap.learnShared([...learned.values()]) }, "category keywords learned");
   }
 
   /** Classifies one batch; returns the cursor for the next batch, or null when the scope is done. */
@@ -129,26 +153,40 @@ export function classificationService(db: Db, log: Logger) {
     const { rows, cursor } = await nextBatch(userId, scope);
     if (rows.length === 0) return cursor;
 
-    const [categories, rules] = await Promise.all([categoriesRepo.listAll(userId), rulesRepo.listActive(userId)]);
+    const [categories, rules, entries] = await Promise.all([categoriesRepo.listAll(userId), rulesRepo.listActive(userId), categoryMap.entriesFor(userId)]);
     const categoryById = new Map(categories.map((c) => [c.id, c]));
+    const categoryByName = new Map(categories.map((c) => [c.name.toLowerCase(), c]));
+    const individual = categoryByName.get(INDIVIDUAL_CATEGORY.toLowerCase());
     const domainRules = rules.map(toRule);
-    const keyOf = (t: TransactionRow) => merchantKey(t.merchant_normalized ?? t.merchant_raw, t.counterparty_vpa);
-    const learned = await merchantMap.forKeys(userId, rows.flatMap((t) => keyOf(t) ?? []));
 
     const patches = new Map<string, Patch>();
     const pendingLlm: TransactionRow[] = [];
     for (const t of rows) {
       const rule = firstMatchingRule({ merchant: t.merchant_normalized ?? t.merchant_raw, vpa: t.counterparty_vpa, narration: t.narration }, domainRules);
-      const mapped = learned.get(keyOf(t) ?? "");
       if (rule) {
         const categoryId = rule.categoryId ?? t.category_id;
         patches.set(t.id, { category_id: categoryId, category_source: "rule", category_confidence: 1, transaction_kind: kindFor(t, categoryById.get(categoryId ?? ""), rule.transactionKind) });
-      } else if (mapped) {
-        patches.set(t.id, { category_id: mapped.category_id, category_source: "merchant_map", category_confidence: 1, transaction_kind: kindFor(t, categoryById.get(mapped.category_id), mapped.transaction_kind) });
-      } else if (!DETERMINISTIC_KINDS.has(t.transaction_kind) && t.status === "success") {
-        patches.set(t.id, { transaction_kind: defaultKind(t) });
-        pendingLlm.push(t);
+        continue;
       }
+      if (DETERMINISTIC_KINDS.has(t.transaction_kind) || t.status !== "success") continue;
+
+      const mapped = matchCategory(matchTexts(t), entries);
+      const mappedCategory = mapped ? categoryByName.get(mapped.categoryName.toLowerCase()) : undefined;
+      if (mapped && mappedCategory) {
+        patches.set(t.id, {
+          category_id: mappedCategory.id,
+          category_source: "merchant_map",
+          category_confidence: 1,
+          transaction_kind: kindFor(t, mappedCategory, mapped.transactionKind),
+        });
+        continue;
+      }
+      if (individual && looksLikeIndividual({ merchant: t.merchant_normalized ?? t.merchant_raw, vpa: t.counterparty_vpa, narration: t.narration })) {
+        patches.set(t.id, { category_id: individual.id, category_source: "system", category_confidence: 1, transaction_kind: defaultKind(t) });
+        continue;
+      }
+      patches.set(t.id, { transaction_kind: defaultKind(t) });
+      pendingLlm.push(t);
     }
 
     const reviewItems: NewReviewItem[] = [];

@@ -5,17 +5,17 @@ Track spending from **PhonePe, Google Pay and Paytm** (plus bank statements) and
 - Your personal spending is kept separate from transfers between your own accounts, money you paid on behalf of friends, and refunds you're still waiting for.
 - Split a payment and send each friend a **private link**. They can agree and report paying you without signing up.
 
-**Stack:** Next.js 16 (App Router, Cache Components) · Supabase (Postgres, Auth, RLS) · Cloudflare R2 (statement files) · Vercel · Vercel AI SDK with a per-task choice of OpenAI, Gemini, Grok or self-hosted Ollama.
+**Stack:** Next.js 16 (App Router, Cache Components) · Supabase (Postgres, Auth, RLS) · Cloudflare R2 (statement files) · Vercel · Ollama (via the Vercel AI SDK), configured in code.
 
-**Principle:** money math, matching and settlement are deterministic SQL/TypeScript. AI only suggests categories and writes explanations, and it is optional.
+**Principle:** money math, matching and settlement are deterministic SQL/TypeScript. AI works out unfamiliar statement layouts, reads unknown PDFs, categorises merchants nobody has mapped yet, and writes explanations. Everything it produces is checked against the source text before it's used.
 
 ## What it does
 
 | Area | Details |
 | --- | --- |
-| Import | CSV, Excel or PDF from PhonePe, Google Pay, Paytm, HDFC, ICICI, SBI and all public-sector banks. Unknown CSV/Excel layouts → column mapper, remembered as a template. PDF passwords are used once and never stored. |
+| Import | Drop any CSV, Excel or PDF statement and it's imported automatically. The bank or UPI app and the layout are recognised from **stored layouts shared by all users**. If none matches, AI works out the columns (proved on the file, then saved for everyone) or reads the PDF's rows (each kept only if its date and amount appear verbatim). PDF passwords are used once and never stored. |
 | Reconciliation | The same payment from the app and the bank is matched by UTR into one transaction. Amount + time near-matches go to review and are never merged automatically. Re-imports are deduplicated. |
-| Classification | Order: your rules → merchants you've corrected before → optional AI. Own transfers, refunds, reversals and card bills are detected from the statement itself. Anything you edit is locked against rules/AI. |
+| Classification | Order: your rules → own transfers/refunds/card bills from the statement → **category map** (your own corrections first, then the longest shared keyword, e.g. `indmoney credit card repayment` beats `indmoney`) → payments to people = **Individual** (never stored in the map) → AI for anything left, whose keywords join the shared map. Anything you edit is locked and remembered for that merchant. |
 | Dashboard | Personal spending · all money out · paid for others · own transfers · income · refunds · owed to you · money expected back, plus categories and data completeness. |
 | Refunds | Track expected refunds and get matching credits suggested after each import. You confirm the match. An AI can draft a support message. |
 | Splits | Equal, exact or percent splits. Each person gets a private link (32-byte token, only its hash is stored, 7-day expiry, one device). Statuses: agreed / questioned / reported paid, and you confirm received. Edits ask for reconfirmation. |
@@ -27,7 +27,7 @@ src/
   app/        routing shell only: page.tsx re-exports a frontend page, route.ts hands off to a controller
   frontend/   pages/<page>/<Page>.tsx + .module.css, components/, hooks/, lib/apiClient.ts
   backend/    server-only: config, constants, http/withHandler, controllers → services → repositories,
-              domain (matching, allocation, rules), import (readers, engine, presets), llm, jobs
+              domain (matching, allocation, rules, category map), import (readers, engine), llm, jobs
   shared/     enums, labels, routes, limits, per-source formats (sources.ts), zod DTO schemas, money & split math
 supabase/migrations/   one core migration: schema, RLS, SQL functions
 tests/unit/            vitest unit tests        tests/db/   SQL + RLS tests on PGlite (no Docker needed)
@@ -36,7 +36,7 @@ scripts/               rls-check.ts (live RLS smoke test), mkroute.sh (route gen
 
 - **Layer rules are enforced by ESLint.** The frontend never imports backend code or Supabase; it calls `/api/v1/*` through `apiClient`. Backend files import `server-only`.
 - **jscpd** fails lint on duplicated code.
-- **Add a bank or app** by writing a config file in `src/backend/import/presets/`. No parser code is needed.
+- **Statement layouts** live in the `import_layouts` table (seeded from `tests/fixtures/layouts.seed.json`); new ones are learned automatically. **Category keywords** live in `category_map`.
 - **Accepted formats and export instructions** per source live in `src/shared/constants/sources.ts`.
 
 ## Local development
@@ -89,30 +89,28 @@ Node 20.9+ is required; Node 22+ is recommended.
 3. After deploying:
    - check `GET /api/v1/health` returns `ok`.
 
-### 4. AI models (optional)
-- **Cloud providers:** set `OPENAI_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY` and/or `XAI_API_KEY`.
-- **Ollama:** a deployed app cannot reach `localhost` on your laptop. Run Ollama on a server behind an authenticated gateway and list it in `OLLAMA_ENDPOINTS=name=https://host/api`. Optionally set `OLLAMA_API_KEY` for a bearer token.
-  - Users choose endpoints by name and can never enter a URL.
-  - Models tagged `:cloud` (e.g. `glm-5.2:cloud`) count as cloud processing.
-- **Enabling a model:** users enable models per task under **Settings → AI models**. A model must pass a live structured-output check before it can be saved. Cloud models also require the user to tick "Allow cloud processing".
+### 4. AI (Ollama)
+- **Where it runs:** set `OLLAMA_API_KEY` (an ollama.com key) for Ollama Cloud, the default. For a local or self-hosted Ollama, set `OLLAMA_BASE_URL`, e.g. `http://localhost:11434/api`. A deployed app can't reach `localhost` on your laptop.
+- **What it runs:** the model, input/output token limits, temperature, timeout and per-task on/off switches are constants in `src/backend/constants/llm.constants.ts`. Edit and redeploy to change them; users have no AI settings.
+- **Check it:** `npm run llm:check` sends one structured-output test to the configured model.
+- Without a reachable Ollama, imports with stored layouts still work. Unknown layouts, unknown PDFs and AI categorisation retry later.
 
 ## Security & privacy notes
 
 - **Never asked for:** UPI PIN, OTP or bank password. Statements are uploaded by the user.
 - **Row-level security:** RLS is on every table, and owner policies exclude anonymous sessions. Guests reach data only through `SECURITY DEFINER` functions that check their `guest_access` row and return only their own share.
-- **What reaches an AI model:** account numbers, phone numbers, emails and long references are removed first. Statement text is passed to the model as untrusted data. Totals are computed in SQL; the model only explains them.
+- **What reaches the AI model:** account numbers, phone numbers and emails are removed first (UTRs are kept when reading PDFs so payments can be reconciled). Statement text is passed as untrusted data. Totals are computed in SQL; the model only explains them. The shared tables hold no personal data: layouts store column names or a hash of a PDF's header lines, and the category map stores merchant keywords only.
 - **Guest links:**
   - links are redeemed only by an explicit POST, never on GET, so chat previews don't consume them;
   - guest pages and APIs send `no-referrer` and `no-store`;
   - redemption is rate-limited, and the token is removed from the URL after use.
 - **Logging:** logs are structured JSON with tokens, cookies and personal data redacted. Security-relevant changes are written to `audit_events`.
 
-## Import presets: verification status
+## Stored layouts: verification status
 
-Every built-in preset is **marked unverified**. Each was written from a published layout and tested only against synthetic fixtures (`tests/fixtures/synthetic`). To verify one:
+The seeded layouts were written from published layouts and tested only against synthetic fixtures (`tests/fixtures/synthetic`). Layouts learned by AI are proved on the file that taught them. All are `verified = false` until checked against a real anonymised export:
 
-1. Add an anonymised real export under `tests/fixtures/real/`.
-2. Add a test for it next to `tests/unit/import/engine.test.ts`.
-3. Set `verified: true` on the preset.
+1. Add the export under `tests/fixtures/real/` with a test next to `tests/unit/import/engine.test.ts`.
+2. Set `verified = true` on its `import_layouts` row.
 
-Imports read with an unverified preset show a "please check the rows" badge.
+Imports read by AI, or with an AI-learned layout, show a "Read by AI, please check the rows" badge.

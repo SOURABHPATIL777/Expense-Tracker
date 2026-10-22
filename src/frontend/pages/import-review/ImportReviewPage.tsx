@@ -17,7 +17,6 @@ import { FormField } from "@/frontend/components/Form/FormField";
 import { Select } from "@/frontend/components/Select/Select";
 import { Skeleton } from "@/frontend/components/Skeleton/Skeleton";
 import { ConfirmDialog } from "@/frontend/components/ConfirmDialog/ConfirmDialog";
-import { ColumnMapper } from "@/frontend/components/ColumnMapper/ColumnMapper";
 import { useApi } from "@/frontend/hooks/useApi";
 import { usePaginatedList } from "@/frontend/hooks/usePaginatedList";
 import { usePolling } from "@/frontend/hooks/usePolling";
@@ -26,7 +25,6 @@ import { api } from "@/frontend/lib/apiClient";
 import { formatDate } from "@/frontend/lib/format";
 import { API_ROUTES, PAGE_ROUTES } from "@/shared/constants/routes";
 import { IMPORT_STATUS_LABELS, SOURCE_APP_LABELS, type LabelMap } from "@/shared/constants/labels";
-import { SOURCE_CONFIG } from "@/shared/constants/sources";
 import type { ImportStatus } from "@/shared/constants/enums";
 import { passwordSchema, type ImportDto, type ImportRowDto } from "@/shared/schemas/imports";
 import styles from "./ImportReviewPage.module.css";
@@ -84,7 +82,6 @@ export default function ImportReviewPage() {
   if (imp.error) return <Alert tone="danger">{imp.error.message}</Alert>;
   if (!imp.data) return <Skeleton lines={6} />;
   const d = imp.data;
-  const source = SOURCE_CONFIG[d.sourceApp];
   const refresh = () => {
     imp.reload();
     rows.reload();
@@ -96,7 +93,7 @@ export default function ImportReviewPage() {
         title={d.fileName}
         description={
           <>
-            {SOURCE_APP_LABELS[d.sourceApp]}
+            {d.sourceApp ? SOURCE_APP_LABELS[d.sourceApp] : "Detecting the app or bank…"}
             {d.periodStart && ` · ${formatDate(d.periodStart)} – ${formatDate(d.periodEnd)}`}
           </>
         }
@@ -110,8 +107,8 @@ export default function ImportReviewPage() {
       <div className={styles.stack}>
         <div className={styles.statusLine}>
           <StatusBadge value={d.status} map={IMPORT_STATUS_LABELS} />
-          {d.presetLabel && <span className={styles.muted}>Read as: {d.presetLabel}</span>}
-          {d.presetVerified === false && <Badge tone="warning">Layout not yet verified, please check the rows</Badge>}
+          {d.detectedLabel && <span className={styles.muted}>Detected as: {d.detectedLabel}</span>}
+          {d.readByAi && <Badge tone="warning">Read by AI, please check the rows</Badge>}
         </div>
 
         {d.errorMessage && <Alert tone={d.status === "failed" ? "danger" : "warning"}>{d.errorMessage}</Alert>}
@@ -131,7 +128,7 @@ export default function ImportReviewPage() {
         </div>
 
         {d.status === "needs_password" && (
-          <Card title="This file is password protected" description={source.passwordHint ?? "Enter the password used to open this statement."}>
+          <Card title="This file is password protected" description="PhonePe and Paytm usually use your registered mobile number; banks often use a mix of your name, date of birth or customer ID.">
             <Form schema={passwordSchema} submitLabel="Unlock and import" onSubmit={async (v) => {
               await api.post(API_ROUTES.importPassword(id), v);
               refresh();
@@ -141,11 +138,6 @@ export default function ImportReviewPage() {
           </Card>
         )}
 
-        {(d.status === "needs_mapping" || (d.status === "failed" && d.errorCode !== "UNSUPPORTED_FILE" && /\.(csv|xlsx?)$/i.test(d.fileName))) && (
-          <Card title="Map your columns" description="Tell us which column is which. We'll remember this layout next time.">
-            <ColumnMapper importId={id} onApplied={refresh} />
-          </Card>
-        )}
 
         <Card
           title="Rows in this file"

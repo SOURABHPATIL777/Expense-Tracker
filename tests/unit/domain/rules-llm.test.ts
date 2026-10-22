@@ -1,8 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { firstMatchingRule, type Rule } from "@/backend/domain/rules";
 import { categorizeData, categorizeSchema } from "@/backend/llm/prompts/categorize";
-import { isCloudModel } from "@/backend/llm/registry";
-import { llmConfigInputSchema } from "@/shared/schemas/llm";
 import { ruleFormSchema } from "@/shared/schemas/categories";
 import { istDateRange } from "@/backend/domain/period";
 
@@ -51,42 +49,37 @@ describe("categorize prompt", () => {
 
   it("only accepts category names from the user's list", () => {
     const schema = categorizeSchema(["Food", "Travel"]);
-    expect(schema.safeParse({ items: [{ index: 0, category: "Food", kind: "expense", confidence: 0.9 }] }).success).toBe(true);
-    expect(schema.safeParse({ items: [{ index: 0, category: "Crypto", kind: "expense", confidence: 0.9 }] }).success).toBe(false);
+    const item = { index: 0, isIndividual: false, keyword: "swiggy", kind: "expense", confidence: 0.9 };
+    expect(schema.safeParse({ items: [{ ...item, category: "Food" }] }).success).toBe(true);
+    expect(schema.safeParse({ items: [{ ...item, category: "Crypto" }] }).success).toBe(false);
   });
 });
 
-describe("cloud consent", () => {
-  it.each([
-    [{ provider: "openai", model: "gpt-5-mini" }, true],
-    [{ provider: "ollama", model: "qwen3.5:9b" }, false],
-    [{ provider: "ollama", model: "glm-5.2:cloud" }, true],
-  ] as const)("%o → %s", (ref, cloud) => {
-    expect(isCloudModel(ref)).toBe(cloud);
-  });
-
-  it("treats endpoints hosted on ollama.com as cloud, whatever the model name", () => {
-    process.env.OLLAMA_ENDPOINTS = "local=http://localhost:11434/api,cloud=https://ollama.com/api";
-    vi.resetModules();
-    return import("@/backend/llm/registry").then(({ isCloudModel: fresh }) => {
-      expect(fresh({ provider: "ollama", model: "glm-5.2", endpointName: "cloud" })).toBe(true);
-      expect(fresh({ provider: "ollama", model: "qwen3.5:9b", endpointName: "local" })).toBe(false);
-    });
-  });
-
-  it("uses Ollama Cloud when only an API key is configured", async () => {
-    process.env.OLLAMA_ENDPOINTS = "";
-    process.env.OLLAMA_API_KEY = "test-ollama-key";
-    vi.resetModules();
-    const { getEnv } = await import("@/backend/config/env");
-    expect(getEnv().OLLAMA_ENDPOINTS).toEqual({ cloud: "https://ollama.com/api" });
+describe("Ollama configuration", () => {
+  it("defaults to Ollama Cloud and needs a key there; a local URL needs none", async () => {
+    delete process.env.OLLAMA_BASE_URL;
     delete process.env.OLLAMA_API_KEY;
+    vi.resetModules();
+    let env = await import("@/backend/config/env");
+    let registry = await import("@/backend/llm/registry");
+    expect(env.getEnv().OLLAMA_BASE_URL).toBe("https://ollama.com/api");
+    expect(registry.llmAvailable()).toBe(false);
+
+    process.env.OLLAMA_BASE_URL = "http://localhost:11434/api/";
+    vi.resetModules();
+    env = await import("@/backend/config/env");
+    registry = await import("@/backend/llm/registry");
+    expect(env.getEnv().OLLAMA_BASE_URL).toBe("http://localhost:11434/api");
+    expect(registry.llmAvailable()).toBe(true);
+    delete process.env.OLLAMA_BASE_URL;
   });
 
-  it("requires an endpoint name for Ollama configs", () => {
-    const base = { task: "categorize", provider: "ollama", model: "qwen3.5:9b" };
-    expect(llmConfigInputSchema.safeParse(base).success).toBe(false);
-    expect(llmConfigInputSchema.safeParse({ ...base, endpointName: "local" }).success).toBe(true);
+  it("keeps prompts inside the configured input-token budget", async () => {
+    const { inputBudgetChars, truncateForBudget } = await import("@/backend/llm/run");
+    const { LLM } = await import("@/backend/constants/llm.constants");
+    const budget = inputBudgetChars("categorize");
+    expect(budget).toBeLessThan(LLM.MAX_INPUT_TOKENS * LLM.CHARS_PER_TOKEN);
+    expect(truncateForBudget("x".repeat(budget + 500), budget)).toHaveLength(budget);
   });
 });
 

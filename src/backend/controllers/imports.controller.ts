@@ -5,7 +5,7 @@ import { RATE_LIMITS } from "@/backend/constants/security.constants";
 import { importsService } from "@/backend/services/imports.service";
 import { readIdempotencyKey, withIdempotency } from "@/backend/services/idempotency";
 import { idParamsSchema, paginationQuerySchema } from "@/shared/schemas/common";
-import { createImportSchema, mappingSchema, passwordSchema, rowsQuerySchema } from "@/shared/schemas/imports";
+import { createImportSchema, passwordSchema, rowsQuerySchema } from "@/shared/schemas/imports";
 
 const USER = AUTH_MODES.USER;
 const byId = { auth: USER, params: idParamsSchema } as const;
@@ -27,12 +27,6 @@ export const importsController = {
   get: withHandler(byId, async ({ db, log, auth, params }) => importsService(db, log).get(auth.userId, params.id)),
 
   uploaded: withHandler(byId, async ({ db, log, auth, params }) => importsService(db, log).markUploaded(auth.userId, params.id)),
-
-  preview: withHandler(byId, async ({ db, log, auth, params }) => importsService(db, log).preview(auth.userId, params.id)),
-
-  mapping: withHandler({ ...byId, body: mappingSchema }, async ({ db, log, auth, params, body }) =>
-    importsService(db, log).applyMapping(auth.userId, params.id, body),
-  ),
 
   password: withHandler(
     { ...byId, body: passwordSchema, rateLimit: { bucket: "import-password", policy: RATE_LIMITS.AUTH } },

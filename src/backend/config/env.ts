@@ -1,35 +1,12 @@
 import "server-only";
 import { z } from "zod";
+import { DEFAULT_OLLAMA_BASE_URL } from "@/backend/constants/llm.constants";
 
 const optionalSecret = z
   .string()
   .trim()
   .optional()
   .transform((v) => (v ? v : undefined));
-
-/**
- * `OLLAMA_ENDPOINTS` is an admin allowlist: `name=url` pairs separated by commas,
- * e.g. `local=http://localhost:11434/api,gpu=https://ollama.internal.example.com/api`.
- * Users pick an endpoint by name; they can never supply a URL (prevents SSRF).
- */
-const ollamaEndpoints = z
-  .string()
-  .default("")
-  .transform((raw, ctx) => {
-    const out: Record<string, string> = {};
-    for (const pair of raw.split(",").map((p) => p.trim()).filter(Boolean)) {
-      const [name, url] = pair.split("=").map((s) => s.trim());
-      if (!name || !url || !URL.canParse(url)) {
-        ctx.addIssue({ code: "custom", message: `Invalid OLLAMA_ENDPOINTS entry: ${pair}` });
-        return z.NEVER;
-      }
-      out[name] = url.replace(/\/$/, "");
-    }
-    return out;
-  });
-
-/** Used when only OLLAMA_API_KEY is set: Ollama's hosted API. */
-export const OLLAMA_CLOUD_ENDPOINT = { name: "cloud", url: "https://ollama.com/api" } as const;
 
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -45,18 +22,12 @@ const envSchema = z.object({
   /** Override for EU/FedRAMP jurisdictions, e.g. https://<account>.eu.r2.cloudflarestorage.com */
   R2_ENDPOINT: optionalSecret.pipe(z.url().optional()),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
-  OPENAI_API_KEY: optionalSecret,
-  GOOGLE_GENERATIVE_AI_API_KEY: optionalSecret,
-  XAI_API_KEY: optionalSecret,
-  OLLAMA_ENDPOINTS: ollamaEndpoints,
+  // Ollama is the only AI provider. Model and limits live in constants/llm.constants.ts.
+  /** Defaults to Ollama Cloud; use http://localhost:11434/api for a local Ollama. */
+  OLLAMA_BASE_URL: optionalSecret.pipe(z.url().optional()).transform((v) => (v ?? DEFAULT_OLLAMA_BASE_URL).replace(/\/$/, "")),
+  /** Bearer token: an ollama.com API key, or your gateway's token. Not needed for a local Ollama. */
   OLLAMA_API_KEY: optionalSecret,
-})
-  // A key with no endpoint list means "use Ollama Cloud" — the SDK is then called with just the key.
-  .transform((env) =>
-    Object.keys(env.OLLAMA_ENDPOINTS).length === 0 && env.OLLAMA_API_KEY
-      ? { ...env, OLLAMA_ENDPOINTS: { [OLLAMA_CLOUD_ENDPOINT.name]: OLLAMA_CLOUD_ENDPOINT.url } }
-      : env,
-  );
+});
 
 export type Env = z.infer<typeof envSchema>;
 

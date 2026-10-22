@@ -17,12 +17,10 @@
     "db:link": "supabase link",
     "db:push": "supabase db push",
     "db:types": "supabase gen types typescript --linked > src/backend/supabase/database.types.ts",
-    "rls:check": "tsx scripts/rls-check.ts"
+    "rls:check": "tsx scripts/rls-check.ts",
+    "llm:check": "tsx --conditions=react-server scripts/llm-check.mts"
   },
   "dependencies": {
-    "@ai-sdk/google": "^3.0.137",
-    "@ai-sdk/openai": "^3.0.131",
-    "@ai-sdk/xai": "^3.0.145",
     "@aws-sdk/client-s3": "^3.1155.0",
     "@aws-sdk/s3-request-presigner": "^3.1155.0",
     "@supabase/ssr": "^0.12.7",

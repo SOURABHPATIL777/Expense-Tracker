@@ -1,0 +1,1711 @@
+[
+  {
+    "kind": "text",
+    "signature": "upi.phonepe.pdf.v1",
+    "label": "PhonePe statement (PDF)",
+    "source_kind": "upi_app",
+    "source_app": "phonepe",
+    "priority": 100,
+    "config": {
+      "id": "upi.phonepe.pdf.v1",
+      "label": "PhonePe statement (PDF)",
+      "sourceKind": "upi_app",
+      "sourceApp": "phonepe",
+      "reader": "pdf_text",
+      "verified": false,
+      "text": {
+        "detect": [
+          "phonepe",
+          "transaction id"
+        ],
+        "recordStart": "^(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \\d{1,2},? \\d{4}\\b",
+        "ignoreLines": [
+          "^Page \\d+ of \\d+",
+          "^Date\\s+Transaction Details",
+          "system generated",
+          "^Transaction Statement",
+          "^(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \\d{1,2},? \\d{4}\\s*-\\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)"
+        ],
+        "fields": {
+          "date": "^(?<date>(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \\d{1,2},? \\d{4})",
+          "time": "(?<time>\\d{1,2}:\\d{2}\\s?[ap]m)",
+          "amount": "(?:₹|INR|Rs\\.?)\\s?(?<amount>[\\d,]+(?:\\.\\d{1,2})?)",
+          "debitWhen": "\\bDEBIT\\b",
+          "creditWhen": "\\bCREDIT\\b",
+          "narration": "^(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \\d{1,2},? \\d{4}\\s+(?<narration>.+?)\\s+(?:DEBIT|CREDIT)\\b",
+          "counterparty": "(?:Paid to|Received from|Payment to|Transfer to|Refund from|Sent to|Bill paid -|Mobile recharged)\\s+(?<counterparty>.+?)\\s+(?:DEBIT|CREDIT)\\b",
+          "appTransactionId": "Transaction ID\\s*:?\\s*(?<appTransactionId>[A-Z0-9]{8,})",
+          "reference": "UTR No\\.?\\s*:?\\s*(?<reference>\\d{10,})"
+        },
+        "status": [
+          {
+            "when": "\\bFailed\\b",
+            "status": "failed"
+          },
+          {
+            "when": "\\bPending\\b",
+            "status": "pending"
+          }
+        ],
+        "dateFormats": [
+          "MMM dd, yyyy",
+          "MMM d, yyyy",
+          "MMM dd yyyy",
+          "MMM d yyyy"
+        ]
+      }
+    }
+  },
+  {
+    "kind": "text",
+    "signature": "upi.gpay.pdf.v1",
+    "label": "Google Pay statement (PDF)",
+    "source_kind": "upi_app",
+    "source_app": "gpay",
+    "priority": 101,
+    "config": {
+      "id": "upi.gpay.pdf.v1",
+      "label": "Google Pay statement (PDF)",
+      "sourceKind": "upi_app",
+      "sourceApp": "gpay",
+      "reader": "pdf_text",
+      "verified": false,
+      "text": {
+        "detect": [
+          "google pay",
+          "upi transaction id"
+        ],
+        "recordStart": "^\\d{1,2} (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*,? \\d{4}\\b",
+        "ignoreLines": [
+          "^Page \\d+",
+          "^Date\\s*(?:&|and)?\\s*time",
+          "^Transaction statement"
+        ],
+        "fields": {
+          "date": "^(?<date>\\d{1,2} (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*,? \\d{4})",
+          "time": "(?<time>\\d{1,2}:\\d{2}\\s?[AaPp][Mm])",
+          "amount": "(?:₹|INR|Rs\\.?)\\s?(?<amount>[\\d,]+(?:\\.\\d{1,2})?)",
+          "debitWhen": "\\b(?:Paid to|Sent to)\\b",
+          "creditWhen": "\\b(?:Received from|Refund from)\\b",
+          "narration": "^\\d{1,2} (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*,? \\d{4}\\s+(?<narration>.+?)\\s+(?:₹|INR|Rs)",
+          "counterparty": "(?:Paid to|Sent to|Received from|Refund from)\\s+(?<counterparty>.+?)\\s+(?:₹|INR|Rs)",
+          "reference": "UPI Transaction ID:?\\s*(?<reference>\\d{10,})"
+        },
+        "status": [
+          {
+            "when": "\\b(?:Failed|Declined)\\b",
+            "status": "failed"
+          },
+          {
+            "when": "\\bPending\\b",
+            "status": "pending"
+          }
+        ],
+        "dateFormats": [
+          "dd MMM, yyyy",
+          "d MMM, yyyy",
+          "dd MMM yyyy",
+          "d MMM yyyy",
+          "dd MMMM, yyyy",
+          "d MMMM, yyyy"
+        ]
+      }
+    }
+  },
+  {
+    "kind": "table",
+    "signature": "upi.paytm.table.v1",
+    "label": "Paytm UPI statement (CSV/Excel)",
+    "source_kind": "upi_app",
+    "source_app": "paytm",
+    "priority": 102,
+    "config": {
+      "id": "upi.paytm.table.v1",
+      "label": "Paytm UPI statement (CSV/Excel)",
+      "sourceKind": "upi_app",
+      "sourceApp": "paytm",
+      "reader": "table",
+      "verified": false,
+      "table": {
+        "headerMatch": [
+          "date",
+          "transaction details",
+          "your account",
+          "amount",
+          "upi ref no"
+        ],
+        "columns": {
+          "date": [
+            "date"
+          ],
+          "time": [
+            "time"
+          ],
+          "narration": [
+            "transaction details"
+          ],
+          "counterparty": [
+            "transaction details"
+          ],
+          "vpa": [
+            "other transaction details upi id or a c no",
+            "other transaction details"
+          ],
+          "reference": [
+            "upi ref no"
+          ],
+          "appTransactionId": [
+            "order id"
+          ],
+          "note": [
+            "comment",
+            "remarks"
+          ]
+        },
+        "amount": {
+          "mode": "signed",
+          "amount": [
+            "amount"
+          ]
+        },
+        "status": {
+          "column": [
+            "status"
+          ],
+          "map": {
+            "success": "success",
+            "successful": "success",
+            "failed": "failed",
+            "pending": "pending"
+          }
+        },
+        "dateFormats": [
+          "dd/MM/yyyy",
+          "d MMM yyyy",
+          "dd MMM yyyy",
+          "dd-MM-yyyy"
+        ]
+      }
+    }
+  },
+  {
+    "kind": "text",
+    "signature": "upi.paytm.pdf.v1",
+    "label": "Paytm UPI statement (PDF)",
+    "source_kind": "upi_app",
+    "source_app": "paytm",
+    "priority": 103,
+    "config": {
+      "id": "upi.paytm.pdf.v1",
+      "label": "Paytm UPI statement (PDF)",
+      "sourceKind": "upi_app",
+      "sourceApp": "paytm",
+      "reader": "pdf_text",
+      "verified": false,
+      "text": {
+        "detect": [
+          "paytm",
+          "upi ref"
+        ],
+        "recordStart": "^\\d{1,2} (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \\d{4}\\b",
+        "ignoreLines": [
+          "^Page \\d+",
+          "^Date\\s*(?:&|and)?\\s*Time",
+          "^Passbook"
+        ],
+        "fields": {
+          "date": "^(?<date>\\d{1,2} (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \\d{4})",
+          "time": "(?<time>\\d{1,2}:\\d{2}\\s?[AaPp][Mm])",
+          "amount": "(?:₹|Rs\\.?|INR)\\s?[-+]?\\s?(?<amount>[\\d,]+(?:\\.\\d{1,2})?)",
+          "debitWhen": "\\b(?:Paid to|Sent to|Money sent to)\\b|-\\s?(?:₹|Rs)",
+          "creditWhen": "\\b(?:Received from|Refund from|Money received)\\b|\\+\\s?(?:₹|Rs)",
+          "narration": "^\\d{1,2} (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \\d{4}\\s+(?<narration>.+?)\\s+[-+]?\\s?(?:₹|Rs)",
+          "counterparty": "(?:Paid to|Sent to|Money sent to|Received from|Refund from)\\s+(?<counterparty>.+?)(?:\\s+[-+]?\\s?(?:₹|Rs)|$)",
+          "reference": "UPI Ref(?:erence)?\\s*(?:No\\.?|ID)?:?\\s*(?<reference>\\d{10,})",
+          "appTransactionId": "Order ID:?\\s*(?<appTransactionId>\\w{6,})"
+        },
+        "status": [
+          {
+            "when": "\\bFailed\\b",
+            "status": "failed"
+          },
+          {
+            "when": "\\bPending\\b",
+            "status": "pending"
+          }
+        ],
+        "dateFormats": [
+          "dd MMM yyyy",
+          "d MMM yyyy"
+        ]
+      }
+    }
+  },
+  {
+    "kind": "table",
+    "signature": "bank.hdfc.table.v1",
+    "label": "HDFC Bank statement (CSV/Excel)",
+    "source_kind": "bank",
+    "source_app": "hdfc",
+    "priority": 104,
+    "config": {
+      "sourceKind": "bank",
+      "sourceApp": "hdfc",
+      "verified": false,
+      "id": "bank.hdfc.table.v1",
+      "label": "HDFC Bank statement (CSV/Excel)",
+      "reader": "table",
+      "table": {
+        "headerMatch": [
+          "date",
+          "narration",
+          "withdrawal amt",
+          "deposit amt"
+        ],
+        "columns": {
+          "date": [
+            "date"
+          ],
+          "narration": [
+            "narration"
+          ],
+          "reference": [
+            "chq ref no"
+          ],
+          "balance": [
+            "closing balance"
+          ]
+        },
+        "amount": {
+          "mode": "split",
+          "debit": [
+            "withdrawal amt"
+          ],
+          "credit": [
+            "deposit amt"
+          ]
+        },
+        "dateFormats": [
+          "dd/MM/yy",
+          "dd/MM/yyyy",
+          "dd-MM-yyyy",
+          "dd-MM-yy",
+          "d MMM yyyy",
+          "dd MMM yyyy",
+          "dd-MMM-yyyy",
+          "dd-MMM-yy"
+        ]
+      }
+    }
+  },
+  {
+    "kind": "text",
+    "signature": "bank.hdfc.pdf.v1",
+    "label": "HDFC Bank statement (PDF)",
+    "source_kind": "bank",
+    "source_app": "hdfc",
+    "priority": 105,
+    "config": {
+      "sourceKind": "bank",
+      "sourceApp": "hdfc",
+      "verified": false,
+      "id": "bank.hdfc.pdf.v1",
+      "label": "HDFC Bank statement (PDF)",
+      "reader": "pdf_text",
+      "text": {
+        "detect": [
+          "\\bHDFC\\s+Bank\\b"
+        ],
+        "detectWithinLines": 15,
+        "recordStart": "^(?:\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})\\b",
+        "ignoreLines": [
+          "^Page \\d+",
+          "^(?:Txn|Tran|Transaction|Value|Post)?\\s*Date\\b",
+          "statement of account",
+          "computer generated"
+        ],
+        "fields": {
+          "date": "^(?<date>\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})",
+          "amount": "(?<amount>[\\d,]+\\.\\d{2})\\s*(?:Dr|Cr)?\\s+(?<balance>[\\d,]+\\.\\d{2})\\s*(?:Dr|Cr)?\\s*$",
+          "narration": "^(?:\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})\\s+(?:(?:\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})\\s+)?(?<narration>.+?)\\s+[\\d,]+\\.\\d{2}",
+          "debitWhen": "UPI/DR|\\bDR\\b|TO TRANSFER|WITHDRAWAL|\\bATM\\b|\\bPOS\\b|DEBIT",
+          "creditWhen": "UPI/CR|\\bCR\\b|BY TRANSFER|DEPOSIT|REFUND|REVERSAL|SALARY|INTEREST|CREDIT"
+        },
+        "dateFormats": [
+          "dd/MM/yy",
+          "dd/MM/yyyy",
+          "dd-MM-yyyy",
+          "dd-MM-yy",
+          "d MMM yyyy",
+          "dd MMM yyyy",
+          "dd-MMM-yyyy",
+          "dd-MMM-yy"
+        ],
+        "directionFromBalance": true
+      }
+    }
+  },
+  {
+    "kind": "table",
+    "signature": "bank.icici.table.v1",
+    "label": "ICICI Bank statement (CSV/Excel)",
+    "source_kind": "bank",
+    "source_app": "icici",
+    "priority": 106,
+    "config": {
+      "sourceKind": "bank",
+      "sourceApp": "icici",
+      "verified": false,
+      "id": "bank.icici.table.v1",
+      "label": "ICICI Bank statement (CSV/Excel)",
+      "reader": "table",
+      "table": {
+        "headerMatch": [
+          "transaction date",
+          "transaction remarks",
+          "withdrawal amount",
+          "deposit amount"
+        ],
+        "columns": {
+          "date": [
+            "transaction date",
+            "value date"
+          ],
+          "narration": [
+            "transaction remarks"
+          ],
+          "reference": [
+            "cheque number"
+          ],
+          "balance": [
+            "balance"
+          ]
+        },
+        "amount": {
+          "mode": "split",
+          "debit": [
+            "withdrawal amount"
+          ],
+          "credit": [
+            "deposit amount"
+          ]
+        },
+        "dateFormats": [
+          "dd/MM/yyyy",
+          "dd-MM-yyyy",
+          "dd/MM/yy",
+          "dd-MM-yy",
+          "d MMM yyyy",
+          "dd MMM yyyy",
+          "dd-MMM-yyyy",
+          "dd-MMM-yy"
+        ]
+      }
+    }
+  },
+  {
+    "kind": "text",
+    "signature": "bank.icici.pdf.v1",
+    "label": "ICICI Bank statement (PDF)",
+    "source_kind": "bank",
+    "source_app": "icici",
+    "priority": 107,
+    "config": {
+      "sourceKind": "bank",
+      "sourceApp": "icici",
+      "verified": false,
+      "id": "bank.icici.pdf.v1",
+      "label": "ICICI Bank statement (PDF)",
+      "reader": "pdf_text",
+      "text": {
+        "detect": [
+          "\\bICICI\\s+Bank\\b"
+        ],
+        "detectWithinLines": 15,
+        "recordStart": "^(?:\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})\\b",
+        "ignoreLines": [
+          "^Page \\d+",
+          "^(?:Txn|Tran|Transaction|Value|Post)?\\s*Date\\b",
+          "statement of account",
+          "computer generated"
+        ],
+        "fields": {
+          "date": "^(?<date>\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})",
+          "amount": "(?<amount>[\\d,]+\\.\\d{2})\\s*(?:Dr|Cr)?\\s+(?<balance>[\\d,]+\\.\\d{2})\\s*(?:Dr|Cr)?\\s*$",
+          "narration": "^(?:\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})\\s+(?:(?:\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})\\s+)?(?<narration>.+?)\\s+[\\d,]+\\.\\d{2}",
+          "debitWhen": "UPI/DR|\\bDR\\b|TO TRANSFER|WITHDRAWAL|\\bATM\\b|\\bPOS\\b|DEBIT",
+          "creditWhen": "UPI/CR|\\bCR\\b|BY TRANSFER|DEPOSIT|REFUND|REVERSAL|SALARY|INTEREST|CREDIT"
+        },
+        "dateFormats": [
+          "dd/MM/yyyy",
+          "dd-MM-yyyy",
+          "dd/MM/yy",
+          "dd-MM-yy",
+          "d MMM yyyy",
+          "dd MMM yyyy",
+          "dd-MMM-yyyy",
+          "dd-MMM-yy"
+        ],
+        "directionFromBalance": true
+      }
+    }
+  },
+  {
+    "kind": "table",
+    "signature": "bank.sbi.table.v1",
+    "label": "State Bank of India statement (CSV/Excel)",
+    "source_kind": "bank",
+    "source_app": "sbi",
+    "priority": 108,
+    "config": {
+      "sourceKind": "bank",
+      "sourceApp": "sbi",
+      "verified": false,
+      "id": "bank.sbi.table.v1",
+      "label": "State Bank of India statement (CSV/Excel)",
+      "reader": "table",
+      "table": {
+        "headerMatch": [
+          "txn date",
+          "description",
+          "ref no",
+          "debit",
+          "credit"
+        ],
+        "columns": {
+          "date": [
+            "txn date",
+            "value date"
+          ],
+          "narration": [
+            "description"
+          ],
+          "reference": [
+            "ref no cheque no",
+            "ref no"
+          ],
+          "balance": [
+            "balance"
+          ]
+        },
+        "amount": {
+          "mode": "split",
+          "debit": [
+            "debit"
+          ],
+          "credit": [
+            "credit"
+          ]
+        },
+        "dateFormats": [
+          "d MMM yyyy",
+          "dd MMM yyyy",
+          "dd/MM/yyyy",
+          "dd-MM-yyyy",
+          "dd/MM/yy",
+          "dd-MM-yy",
+          "dd-MMM-yyyy",
+          "dd-MMM-yy"
+        ]
+      }
+    }
+  },
+  {
+    "kind": "text",
+    "signature": "bank.sbi.pdf.v1",
+    "label": "State Bank of India statement (PDF)",
+    "source_kind": "bank",
+    "source_app": "sbi",
+    "priority": 109,
+    "config": {
+      "sourceKind": "bank",
+      "sourceApp": "sbi",
+      "verified": false,
+      "id": "bank.sbi.pdf.v1",
+      "label": "State Bank of India statement (PDF)",
+      "reader": "pdf_text",
+      "text": {
+        "detect": [
+          "\\bState\\s+Bank\\s+of\\s+India\\b"
+        ],
+        "detectWithinLines": 15,
+        "recordStart": "^(?:\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})\\b",
+        "ignoreLines": [
+          "^Page \\d+",
+          "^(?:Txn|Tran|Transaction|Value|Post)?\\s*Date\\b",
+          "statement of account",
+          "computer generated"
+        ],
+        "fields": {
+          "date": "^(?<date>\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})",
+          "amount": "(?<amount>[\\d,]+\\.\\d{2})\\s*(?:Dr|Cr)?\\s+(?<balance>[\\d,]+\\.\\d{2})\\s*(?:Dr|Cr)?\\s*$",
+          "narration": "^(?:\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})\\s+(?:(?:\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})\\s+)?(?<narration>.+?)\\s+[\\d,]+\\.\\d{2}",
+          "debitWhen": "UPI/DR|\\bDR\\b|TO TRANSFER|WITHDRAWAL|\\bATM\\b|\\bPOS\\b|DEBIT",
+          "creditWhen": "UPI/CR|\\bCR\\b|BY TRANSFER|DEPOSIT|REFUND|REVERSAL|SALARY|INTEREST|CREDIT"
+        },
+        "dateFormats": [
+          "d MMM yyyy",
+          "dd MMM yyyy",
+          "dd/MM/yyyy",
+          "dd-MM-yyyy",
+          "dd/MM/yy",
+          "dd-MM-yy",
+          "dd-MMM-yyyy",
+          "dd-MMM-yy"
+        ],
+        "directionFromBalance": true
+      }
+    }
+  },
+  {
+    "kind": "table",
+    "signature": "bank.pnb.table.v1",
+    "label": "Punjab National Bank statement (CSV/Excel)",
+    "source_kind": "bank",
+    "source_app": "pnb",
+    "priority": 110,
+    "config": {
+      "sourceKind": "bank",
+      "sourceApp": "pnb",
+      "verified": false,
+      "id": "bank.pnb.table.v1",
+      "label": "Punjab National Bank statement (CSV/Excel)",
+      "reader": "table",
+      "table": {
+        "headerMatch": [
+          "transaction date",
+          "withdrawal",
+          "deposit",
+          "narration"
+        ],
+        "columns": {
+          "date": [
+            "transaction date"
+          ],
+          "narration": [
+            "narration"
+          ],
+          "reference": [
+            "cheque number"
+          ],
+          "balance": [
+            "balance"
+          ]
+        },
+        "amount": {
+          "mode": "split",
+          "debit": [
+            "withdrawal"
+          ],
+          "credit": [
+            "deposit"
+          ]
+        },
+        "dateFormats": [
+          "dd/MM/yyyy",
+          "dd-MM-yyyy",
+          "dd/MM/yy",
+          "dd-MM-yy",
+          "d MMM yyyy",
+          "dd MMM yyyy",
+          "dd-MMM-yyyy",
+          "dd-MMM-yy"
+        ]
+      }
+    }
+  },
+  {
+    "kind": "text",
+    "signature": "bank.pnb.pdf.v1",
+    "label": "Punjab National Bank statement (PDF)",
+    "source_kind": "bank",
+    "source_app": "pnb",
+    "priority": 111,
+    "config": {
+      "sourceKind": "bank",
+      "sourceApp": "pnb",
+      "verified": false,
+      "id": "bank.pnb.pdf.v1",
+      "label": "Punjab National Bank statement (PDF)",
+      "reader": "pdf_text",
+      "text": {
+        "detect": [
+          "\\bPunjab\\s+National\\s+Bank\\b"
+        ],
+        "detectWithinLines": 15,
+        "recordStart": "^(?:\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})\\b",
+        "ignoreLines": [
+          "^Page \\d+",
+          "^(?:Txn|Tran|Transaction|Value|Post)?\\s*Date\\b",
+          "statement of account",
+          "computer generated"
+        ],
+        "fields": {
+          "date": "^(?<date>\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})",
+          "amount": "(?<amount>[\\d,]+\\.\\d{2})\\s*(?:Dr|Cr)?\\s+(?<balance>[\\d,]+\\.\\d{2})\\s*(?:Dr|Cr)?\\s*$",
+          "narration": "^(?:\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})\\s+(?:(?:\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})\\s+)?(?<narration>.+?)\\s+[\\d,]+\\.\\d{2}",
+          "debitWhen": "UPI/DR|\\bDR\\b|TO TRANSFER|WITHDRAWAL|\\bATM\\b|\\bPOS\\b|DEBIT",
+          "creditWhen": "UPI/CR|\\bCR\\b|BY TRANSFER|DEPOSIT|REFUND|REVERSAL|SALARY|INTEREST|CREDIT"
+        },
+        "dateFormats": [
+          "dd/MM/yyyy",
+          "dd-MM-yyyy",
+          "dd/MM/yy",
+          "dd-MM-yy",
+          "d MMM yyyy",
+          "dd MMM yyyy",
+          "dd-MMM-yyyy",
+          "dd-MMM-yy"
+        ],
+        "directionFromBalance": true
+      }
+    }
+  },
+  {
+    "kind": "table",
+    "signature": "bank.bob.table.v1",
+    "label": "Bank of Baroda statement (CSV/Excel)",
+    "source_kind": "bank",
+    "source_app": "bob",
+    "priority": 112,
+    "config": {
+      "sourceKind": "bank",
+      "sourceApp": "bob",
+      "verified": false,
+      "id": "bank.bob.table.v1",
+      "label": "Bank of Baroda statement (CSV/Excel)",
+      "reader": "table",
+      "table": {
+        "headerMatch": [
+          "tran date",
+          "narration",
+          "withdrawal",
+          "deposit"
+        ],
+        "columns": {
+          "date": [
+            "tran date",
+            "value date"
+          ],
+          "narration": [
+            "narration"
+          ],
+          "reference": [
+            "chqno",
+            "cheque no"
+          ],
+          "balance": [
+            "balance"
+          ]
+        },
+        "amount": {
+          "mode": "split",
+          "debit": [
+            "withdrawal dr",
+            "withdrawal"
+          ],
+          "credit": [
+            "deposit cr",
+            "deposit"
+          ]
+        },
+        "dateFormats": [
+          "dd/MM/yyyy",
+          "dd-MM-yyyy",
+          "dd/MM/yy",
+          "dd-MM-yy",
+          "d MMM yyyy",
+          "dd MMM yyyy",
+          "dd-MMM-yyyy",
+          "dd-MMM-yy"
+        ]
+      }
+    }
+  },
+  {
+    "kind": "text",
+    "signature": "bank.bob.pdf.v1",
+    "label": "Bank of Baroda statement (PDF)",
+    "source_kind": "bank",
+    "source_app": "bob",
+    "priority": 113,
+    "config": {
+      "sourceKind": "bank",
+      "sourceApp": "bob",
+      "verified": false,
+      "id": "bank.bob.pdf.v1",
+      "label": "Bank of Baroda statement (PDF)",
+      "reader": "pdf_text",
+      "text": {
+        "detect": [
+          "\\bBank\\s+of\\s+Baroda\\b"
+        ],
+        "detectWithinLines": 15,
+        "recordStart": "^(?:\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})\\b",
+        "ignoreLines": [
+          "^Page \\d+",
+          "^(?:Txn|Tran|Transaction|Value|Post)?\\s*Date\\b",
+          "statement of account",
+          "computer generated"
+        ],
+        "fields": {
+          "date": "^(?<date>\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})",
+          "amount": "(?<amount>[\\d,]+\\.\\d{2})\\s*(?:Dr|Cr)?\\s+(?<balance>[\\d,]+\\.\\d{2})\\s*(?:Dr|Cr)?\\s*$",
+          "narration": "^(?:\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})\\s+(?:(?:\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})\\s+)?(?<narration>.+?)\\s+[\\d,]+\\.\\d{2}",
+          "debitWhen": "UPI/DR|\\bDR\\b|TO TRANSFER|WITHDRAWAL|\\bATM\\b|\\bPOS\\b|DEBIT",
+          "creditWhen": "UPI/CR|\\bCR\\b|BY TRANSFER|DEPOSIT|REFUND|REVERSAL|SALARY|INTEREST|CREDIT"
+        },
+        "dateFormats": [
+          "dd/MM/yyyy",
+          "dd-MM-yyyy",
+          "dd/MM/yy",
+          "dd-MM-yy",
+          "d MMM yyyy",
+          "dd MMM yyyy",
+          "dd-MMM-yyyy",
+          "dd-MMM-yy"
+        ],
+        "directionFromBalance": true
+      }
+    }
+  },
+  {
+    "kind": "table",
+    "signature": "bank.canara.table.v1",
+    "label": "Canara Bank statement (CSV/Excel)",
+    "source_kind": "bank",
+    "source_app": "canara",
+    "priority": 114,
+    "config": {
+      "sourceKind": "bank",
+      "sourceApp": "canara",
+      "verified": false,
+      "id": "bank.canara.table.v1",
+      "label": "Canara Bank statement (CSV/Excel)",
+      "reader": "table",
+      "table": {
+        "headerMatch": [
+          "txn date",
+          "description",
+          "branch code",
+          "debit",
+          "credit"
+        ],
+        "columns": {
+          "date": [
+            "txn date",
+            "value date"
+          ],
+          "narration": [
+            "description"
+          ],
+          "reference": [
+            "cheque no"
+          ],
+          "balance": [
+            "balance"
+          ]
+        },
+        "amount": {
+          "mode": "split",
+          "debit": [
+            "debit"
+          ],
+          "credit": [
+            "credit"
+          ]
+        },
+        "dateFormats": [
+          "dd-MM-yyyy HH:mm:ss",
+          "dd-MM-yyyy",
+          "dd/MM/yyyy",
+          "dd/MM/yy",
+          "dd-MM-yy",
+          "d MMM yyyy",
+          "dd MMM yyyy",
+          "dd-MMM-yyyy",
+          "dd-MMM-yy"
+        ]
+      }
+    }
+  },
+  {
+    "kind": "text",
+    "signature": "bank.canara.pdf.v1",
+    "label": "Canara Bank statement (PDF)",
+    "source_kind": "bank",
+    "source_app": "canara",
+    "priority": 115,
+    "config": {
+      "sourceKind": "bank",
+      "sourceApp": "canara",
+      "verified": false,
+      "id": "bank.canara.pdf.v1",
+      "label": "Canara Bank statement (PDF)",
+      "reader": "pdf_text",
+      "text": {
+        "detect": [
+          "\\bCanara\\s+Bank\\b"
+        ],
+        "detectWithinLines": 15,
+        "recordStart": "^(?:\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})\\b",
+        "ignoreLines": [
+          "^Page \\d+",
+          "^(?:Txn|Tran|Transaction|Value|Post)?\\s*Date\\b",
+          "statement of account",
+          "computer generated"
+        ],
+        "fields": {
+          "date": "^(?<date>\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})",
+          "amount": "(?<amount>[\\d,]+\\.\\d{2})\\s*(?:Dr|Cr)?\\s+(?<balance>[\\d,]+\\.\\d{2})\\s*(?:Dr|Cr)?\\s*$",
+          "narration": "^(?:\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})\\s+(?:(?:\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})\\s+)?(?<narration>.+?)\\s+[\\d,]+\\.\\d{2}",
+          "debitWhen": "UPI/DR|\\bDR\\b|TO TRANSFER|WITHDRAWAL|\\bATM\\b|\\bPOS\\b|DEBIT",
+          "creditWhen": "UPI/CR|\\bCR\\b|BY TRANSFER|DEPOSIT|REFUND|REVERSAL|SALARY|INTEREST|CREDIT"
+        },
+        "dateFormats": [
+          "dd-MM-yyyy HH:mm:ss",
+          "dd-MM-yyyy",
+          "dd/MM/yyyy",
+          "dd/MM/yy",
+          "dd-MM-yy",
+          "d MMM yyyy",
+          "dd MMM yyyy",
+          "dd-MMM-yyyy",
+          "dd-MMM-yy"
+        ],
+        "directionFromBalance": true
+      }
+    }
+  },
+  {
+    "kind": "table",
+    "signature": "bank.union.table.v1",
+    "label": "Union Bank of India statement (CSV/Excel)",
+    "source_kind": "bank",
+    "source_app": "union",
+    "priority": 116,
+    "config": {
+      "sourceKind": "bank",
+      "sourceApp": "union",
+      "verified": false,
+      "id": "bank.union.table.v1",
+      "label": "Union Bank of India statement (CSV/Excel)",
+      "reader": "table",
+      "table": {
+        "headerMatch": [
+          "date",
+          "tran id",
+          "remarks",
+          "amount"
+        ],
+        "columns": {
+          "date": [
+            "date",
+            "tran date"
+          ],
+          "narration": [
+            "remarks"
+          ],
+          "reference": [
+            "tran id"
+          ],
+          "balance": [
+            "balance"
+          ]
+        },
+        "amount": {
+          "mode": "signed",
+          "amount": [
+            "amount rs",
+            "amount"
+          ]
+        },
+        "dateFormats": [
+          "dd/MM/yyyy",
+          "dd-MM-yyyy",
+          "dd/MM/yy",
+          "dd-MM-yy",
+          "d MMM yyyy",
+          "dd MMM yyyy",
+          "dd-MMM-yyyy",
+          "dd-MMM-yy"
+        ]
+      }
+    }
+  },
+  {
+    "kind": "text",
+    "signature": "bank.union.pdf.v1",
+    "label": "Union Bank of India statement (PDF)",
+    "source_kind": "bank",
+    "source_app": "union",
+    "priority": 117,
+    "config": {
+      "sourceKind": "bank",
+      "sourceApp": "union",
+      "verified": false,
+      "id": "bank.union.pdf.v1",
+      "label": "Union Bank of India statement (PDF)",
+      "reader": "pdf_text",
+      "text": {
+        "detect": [
+          "\\bUnion\\s+Bank\\s+of\\s+India\\b"
+        ],
+        "detectWithinLines": 15,
+        "recordStart": "^(?:\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})\\b",
+        "ignoreLines": [
+          "^Page \\d+",
+          "^(?:Txn|Tran|Transaction|Value|Post)?\\s*Date\\b",
+          "statement of account",
+          "computer generated"
+        ],
+        "fields": {
+          "date": "^(?<date>\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})",
+          "amount": "(?<amount>[\\d,]+\\.\\d{2})\\s*(?:Dr|Cr)?\\s+(?<balance>[\\d,]+\\.\\d{2})\\s*(?:Dr|Cr)?\\s*$",
+          "narration": "^(?:\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})\\s+(?:(?:\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})\\s+)?(?<narration>.+?)\\s+[\\d,]+\\.\\d{2}",
+          "debitWhen": "UPI/DR|\\bDR\\b|TO TRANSFER|WITHDRAWAL|\\bATM\\b|\\bPOS\\b|DEBIT",
+          "creditWhen": "UPI/CR|\\bCR\\b|BY TRANSFER|DEPOSIT|REFUND|REVERSAL|SALARY|INTEREST|CREDIT"
+        },
+        "dateFormats": [
+          "dd/MM/yyyy",
+          "dd-MM-yyyy",
+          "dd/MM/yy",
+          "dd-MM-yy",
+          "d MMM yyyy",
+          "dd MMM yyyy",
+          "dd-MMM-yyyy",
+          "dd-MMM-yy"
+        ],
+        "directionFromBalance": true
+      }
+    }
+  },
+  {
+    "kind": "table",
+    "signature": "bank.boi.table.v1",
+    "label": "Bank of India statement (CSV/Excel)",
+    "source_kind": "bank",
+    "source_app": "boi",
+    "priority": 118,
+    "config": {
+      "sourceKind": "bank",
+      "sourceApp": "boi",
+      "verified": false,
+      "id": "bank.boi.table.v1",
+      "label": "Bank of India statement (CSV/Excel)",
+      "reader": "table",
+      "table": {
+        "headerMatch": [
+          "txn date",
+          "description",
+          "withdrawal",
+          "deposit"
+        ],
+        "columns": {
+          "date": [
+            "txn date"
+          ],
+          "narration": [
+            "description"
+          ],
+          "reference": [
+            "cheque no"
+          ],
+          "balance": [
+            "balance"
+          ]
+        },
+        "amount": {
+          "mode": "split",
+          "debit": [
+            "withdrawal dr",
+            "withdrawal"
+          ],
+          "credit": [
+            "deposit cr",
+            "deposit"
+          ]
+        },
+        "dateFormats": [
+          "dd/MM/yyyy",
+          "dd-MM-yyyy",
+          "dd/MM/yy",
+          "dd-MM-yy",
+          "d MMM yyyy",
+          "dd MMM yyyy",
+          "dd-MMM-yyyy",
+          "dd-MMM-yy"
+        ]
+      }
+    }
+  },
+  {
+    "kind": "text",
+    "signature": "bank.boi.pdf.v1",
+    "label": "Bank of India statement (PDF)",
+    "source_kind": "bank",
+    "source_app": "boi",
+    "priority": 119,
+    "config": {
+      "sourceKind": "bank",
+      "sourceApp": "boi",
+      "verified": false,
+      "id": "bank.boi.pdf.v1",
+      "label": "Bank of India statement (PDF)",
+      "reader": "pdf_text",
+      "text": {
+        "detect": [
+          "\\bBank\\s+of\\s+India\\b"
+        ],
+        "detectWithinLines": 15,
+        "recordStart": "^(?:\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})\\b",
+        "ignoreLines": [
+          "^Page \\d+",
+          "^(?:Txn|Tran|Transaction|Value|Post)?\\s*Date\\b",
+          "statement of account",
+          "computer generated"
+        ],
+        "fields": {
+          "date": "^(?<date>\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})",
+          "amount": "(?<amount>[\\d,]+\\.\\d{2})\\s*(?:Dr|Cr)?\\s+(?<balance>[\\d,]+\\.\\d{2})\\s*(?:Dr|Cr)?\\s*$",
+          "narration": "^(?:\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})\\s+(?:(?:\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})\\s+)?(?<narration>.+?)\\s+[\\d,]+\\.\\d{2}",
+          "debitWhen": "UPI/DR|\\bDR\\b|TO TRANSFER|WITHDRAWAL|\\bATM\\b|\\bPOS\\b|DEBIT",
+          "creditWhen": "UPI/CR|\\bCR\\b|BY TRANSFER|DEPOSIT|REFUND|REVERSAL|SALARY|INTEREST|CREDIT"
+        },
+        "dateFormats": [
+          "dd/MM/yyyy",
+          "dd-MM-yyyy",
+          "dd/MM/yy",
+          "dd-MM-yy",
+          "d MMM yyyy",
+          "dd MMM yyyy",
+          "dd-MMM-yyyy",
+          "dd-MMM-yy"
+        ],
+        "directionFromBalance": true
+      }
+    }
+  },
+  {
+    "kind": "table",
+    "signature": "bank.indian.table.v1",
+    "label": "Indian Bank statement (CSV/Excel)",
+    "source_kind": "bank",
+    "source_app": "indian",
+    "priority": 120,
+    "config": {
+      "sourceKind": "bank",
+      "sourceApp": "indian",
+      "verified": false,
+      "id": "bank.indian.table.v1",
+      "label": "Indian Bank statement (CSV/Excel)",
+      "reader": "table",
+      "table": {
+        "headerMatch": [
+          "post date",
+          "details",
+          "debit",
+          "credit"
+        ],
+        "columns": {
+          "date": [
+            "post date",
+            "value date"
+          ],
+          "narration": [
+            "details"
+          ],
+          "balance": [
+            "balance"
+          ]
+        },
+        "amount": {
+          "mode": "split",
+          "debit": [
+            "debit"
+          ],
+          "credit": [
+            "credit"
+          ]
+        },
+        "dateFormats": [
+          "dd/MM/yyyy",
+          "dd-MM-yyyy",
+          "dd MMM yyyy",
+          "dd/MM/yy",
+          "dd-MM-yy",
+          "d MMM yyyy",
+          "dd-MMM-yyyy",
+          "dd-MMM-yy"
+        ]
+      }
+    }
+  },
+  {
+    "kind": "text",
+    "signature": "bank.indian.pdf.v1",
+    "label": "Indian Bank statement (PDF)",
+    "source_kind": "bank",
+    "source_app": "indian",
+    "priority": 121,
+    "config": {
+      "sourceKind": "bank",
+      "sourceApp": "indian",
+      "verified": false,
+      "id": "bank.indian.pdf.v1",
+      "label": "Indian Bank statement (PDF)",
+      "reader": "pdf_text",
+      "text": {
+        "detect": [
+          "\\bIndian\\s+Bank\\b"
+        ],
+        "detectWithinLines": 15,
+        "recordStart": "^(?:\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})\\b",
+        "ignoreLines": [
+          "^Page \\d+",
+          "^(?:Txn|Tran|Transaction|Value|Post)?\\s*Date\\b",
+          "statement of account",
+          "computer generated"
+        ],
+        "fields": {
+          "date": "^(?<date>\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})",
+          "amount": "(?<amount>[\\d,]+\\.\\d{2})\\s*(?:Dr|Cr)?\\s+(?<balance>[\\d,]+\\.\\d{2})\\s*(?:Dr|Cr)?\\s*$",
+          "narration": "^(?:\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})\\s+(?:(?:\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})\\s+)?(?<narration>.+?)\\s+[\\d,]+\\.\\d{2}",
+          "debitWhen": "UPI/DR|\\bDR\\b|TO TRANSFER|WITHDRAWAL|\\bATM\\b|\\bPOS\\b|DEBIT",
+          "creditWhen": "UPI/CR|\\bCR\\b|BY TRANSFER|DEPOSIT|REFUND|REVERSAL|SALARY|INTEREST|CREDIT"
+        },
+        "dateFormats": [
+          "dd/MM/yyyy",
+          "dd-MM-yyyy",
+          "dd MMM yyyy",
+          "dd/MM/yy",
+          "dd-MM-yy",
+          "d MMM yyyy",
+          "dd-MMM-yyyy",
+          "dd-MMM-yy"
+        ],
+        "directionFromBalance": true
+      }
+    }
+  },
+  {
+    "kind": "table",
+    "signature": "bank.central.table.v1",
+    "label": "Central Bank of India statement (CSV/Excel)",
+    "source_kind": "bank",
+    "source_app": "central",
+    "priority": 122,
+    "config": {
+      "sourceKind": "bank",
+      "sourceApp": "central",
+      "verified": false,
+      "id": "bank.central.table.v1",
+      "label": "Central Bank of India statement (CSV/Excel)",
+      "reader": "table",
+      "table": {
+        "headerMatch": [
+          "post date",
+          "account description",
+          "debit",
+          "credit"
+        ],
+        "columns": {
+          "date": [
+            "post date",
+            "value date"
+          ],
+          "narration": [
+            "account description"
+          ],
+          "reference": [
+            "cheque number"
+          ],
+          "balance": [
+            "balance"
+          ]
+        },
+        "amount": {
+          "mode": "split",
+          "debit": [
+            "debit"
+          ],
+          "credit": [
+            "credit"
+          ]
+        },
+        "dateFormats": [
+          "dd/MM/yyyy",
+          "dd-MM-yyyy",
+          "dd/MM/yy",
+          "dd-MM-yy",
+          "d MMM yyyy",
+          "dd MMM yyyy",
+          "dd-MMM-yyyy",
+          "dd-MMM-yy"
+        ]
+      }
+    }
+  },
+  {
+    "kind": "text",
+    "signature": "bank.central.pdf.v1",
+    "label": "Central Bank of India statement (PDF)",
+    "source_kind": "bank",
+    "source_app": "central",
+    "priority": 123,
+    "config": {
+      "sourceKind": "bank",
+      "sourceApp": "central",
+      "verified": false,
+      "id": "bank.central.pdf.v1",
+      "label": "Central Bank of India statement (PDF)",
+      "reader": "pdf_text",
+      "text": {
+        "detect": [
+          "\\bCentral\\s+Bank\\s+of\\s+India\\b"
+        ],
+        "detectWithinLines": 15,
+        "recordStart": "^(?:\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})\\b",
+        "ignoreLines": [
+          "^Page \\d+",
+          "^(?:Txn|Tran|Transaction|Value|Post)?\\s*Date\\b",
+          "statement of account",
+          "computer generated"
+        ],
+        "fields": {
+          "date": "^(?<date>\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})",
+          "amount": "(?<amount>[\\d,]+\\.\\d{2})\\s*(?:Dr|Cr)?\\s+(?<balance>[\\d,]+\\.\\d{2})\\s*(?:Dr|Cr)?\\s*$",
+          "narration": "^(?:\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})\\s+(?:(?:\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})\\s+)?(?<narration>.+?)\\s+[\\d,]+\\.\\d{2}",
+          "debitWhen": "UPI/DR|\\bDR\\b|TO TRANSFER|WITHDRAWAL|\\bATM\\b|\\bPOS\\b|DEBIT",
+          "creditWhen": "UPI/CR|\\bCR\\b|BY TRANSFER|DEPOSIT|REFUND|REVERSAL|SALARY|INTEREST|CREDIT"
+        },
+        "dateFormats": [
+          "dd/MM/yyyy",
+          "dd-MM-yyyy",
+          "dd/MM/yy",
+          "dd-MM-yy",
+          "d MMM yyyy",
+          "dd MMM yyyy",
+          "dd-MMM-yyyy",
+          "dd-MMM-yy"
+        ],
+        "directionFromBalance": true
+      }
+    }
+  },
+  {
+    "kind": "table",
+    "signature": "bank.iob.table.v1",
+    "label": "Indian Overseas Bank statement (CSV/Excel)",
+    "source_kind": "bank",
+    "source_app": "iob",
+    "priority": 124,
+    "config": {
+      "sourceKind": "bank",
+      "sourceApp": "iob",
+      "verified": false,
+      "id": "bank.iob.table.v1",
+      "label": "Indian Overseas Bank statement (CSV/Excel)",
+      "reader": "table",
+      "table": {
+        "headerMatch": [
+          "naration",
+          "cod",
+          "debit",
+          "credit"
+        ],
+        "columns": {
+          "date": [
+            "date",
+            "value date"
+          ],
+          "narration": [
+            "naration",
+            "narration"
+          ],
+          "reference": [
+            "chq no"
+          ],
+          "balance": [
+            "balance"
+          ]
+        },
+        "amount": {
+          "mode": "split",
+          "debit": [
+            "debit"
+          ],
+          "credit": [
+            "credit"
+          ]
+        },
+        "dateFormats": [
+          "dd/MM/yyyy",
+          "dd-MM-yyyy",
+          "dd-MMM-yyyy",
+          "dd/MM/yy",
+          "dd-MM-yy",
+          "d MMM yyyy",
+          "dd MMM yyyy",
+          "dd-MMM-yy"
+        ]
+      }
+    }
+  },
+  {
+    "kind": "text",
+    "signature": "bank.iob.pdf.v1",
+    "label": "Indian Overseas Bank statement (PDF)",
+    "source_kind": "bank",
+    "source_app": "iob",
+    "priority": 125,
+    "config": {
+      "sourceKind": "bank",
+      "sourceApp": "iob",
+      "verified": false,
+      "id": "bank.iob.pdf.v1",
+      "label": "Indian Overseas Bank statement (PDF)",
+      "reader": "pdf_text",
+      "text": {
+        "detect": [
+          "\\bIndian\\s+Overseas\\s+Bank\\b"
+        ],
+        "detectWithinLines": 15,
+        "recordStart": "^(?:\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})\\b",
+        "ignoreLines": [
+          "^Page \\d+",
+          "^(?:Txn|Tran|Transaction|Value|Post)?\\s*Date\\b",
+          "statement of account",
+          "computer generated"
+        ],
+        "fields": {
+          "date": "^(?<date>\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})",
+          "amount": "(?<amount>[\\d,]+\\.\\d{2})\\s*(?:Dr|Cr)?\\s+(?<balance>[\\d,]+\\.\\d{2})\\s*(?:Dr|Cr)?\\s*$",
+          "narration": "^(?:\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})\\s+(?:(?:\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})\\s+)?(?<narration>.+?)\\s+[\\d,]+\\.\\d{2}",
+          "debitWhen": "UPI/DR|\\bDR\\b|TO TRANSFER|WITHDRAWAL|\\bATM\\b|\\bPOS\\b|DEBIT",
+          "creditWhen": "UPI/CR|\\bCR\\b|BY TRANSFER|DEPOSIT|REFUND|REVERSAL|SALARY|INTEREST|CREDIT"
+        },
+        "dateFormats": [
+          "dd/MM/yyyy",
+          "dd-MM-yyyy",
+          "dd-MMM-yyyy",
+          "dd/MM/yy",
+          "dd-MM-yy",
+          "d MMM yyyy",
+          "dd MMM yyyy",
+          "dd-MMM-yy"
+        ],
+        "directionFromBalance": true
+      }
+    }
+  },
+  {
+    "kind": "table",
+    "signature": "bank.uco.table.v1",
+    "label": "UCO Bank statement (CSV/Excel)",
+    "source_kind": "bank",
+    "source_app": "uco",
+    "priority": 126,
+    "config": {
+      "sourceKind": "bank",
+      "sourceApp": "uco",
+      "verified": false,
+      "id": "bank.uco.table.v1",
+      "label": "UCO Bank statement (CSV/Excel)",
+      "reader": "table",
+      "table": {
+        "headerMatch": [
+          "particulars",
+          "withdrawals",
+          "deposits"
+        ],
+        "columns": {
+          "date": [
+            "date",
+            "txn date"
+          ],
+          "narration": [
+            "particulars"
+          ],
+          "reference": [
+            "chq no"
+          ],
+          "balance": [
+            "balance"
+          ]
+        },
+        "amount": {
+          "mode": "split",
+          "debit": [
+            "withdrawals"
+          ],
+          "credit": [
+            "deposits"
+          ]
+        },
+        "dateFormats": [
+          "dd/MM/yyyy",
+          "dd-MM-yyyy",
+          "dd-MMM-yyyy",
+          "dd/MM/yy",
+          "dd-MM-yy",
+          "d MMM yyyy",
+          "dd MMM yyyy",
+          "dd-MMM-yy"
+        ]
+      }
+    }
+  },
+  {
+    "kind": "text",
+    "signature": "bank.uco.pdf.v1",
+    "label": "UCO Bank statement (PDF)",
+    "source_kind": "bank",
+    "source_app": "uco",
+    "priority": 127,
+    "config": {
+      "sourceKind": "bank",
+      "sourceApp": "uco",
+      "verified": false,
+      "id": "bank.uco.pdf.v1",
+      "label": "UCO Bank statement (PDF)",
+      "reader": "pdf_text",
+      "text": {
+        "detect": [
+          "\\bUCO\\s+Bank\\b"
+        ],
+        "detectWithinLines": 15,
+        "recordStart": "^(?:\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})\\b",
+        "ignoreLines": [
+          "^Page \\d+",
+          "^(?:Txn|Tran|Transaction|Value|Post)?\\s*Date\\b",
+          "statement of account",
+          "computer generated"
+        ],
+        "fields": {
+          "date": "^(?<date>\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})",
+          "amount": "(?<amount>[\\d,]+\\.\\d{2})\\s*(?:Dr|Cr)?\\s+(?<balance>[\\d,]+\\.\\d{2})\\s*(?:Dr|Cr)?\\s*$",
+          "narration": "^(?:\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})\\s+(?:(?:\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})\\s+)?(?<narration>.+?)\\s+[\\d,]+\\.\\d{2}",
+          "debitWhen": "UPI/DR|\\bDR\\b|TO TRANSFER|WITHDRAWAL|\\bATM\\b|\\bPOS\\b|DEBIT",
+          "creditWhen": "UPI/CR|\\bCR\\b|BY TRANSFER|DEPOSIT|REFUND|REVERSAL|SALARY|INTEREST|CREDIT"
+        },
+        "dateFormats": [
+          "dd/MM/yyyy",
+          "dd-MM-yyyy",
+          "dd-MMM-yyyy",
+          "dd/MM/yy",
+          "dd-MM-yy",
+          "d MMM yyyy",
+          "dd MMM yyyy",
+          "dd-MMM-yy"
+        ],
+        "directionFromBalance": true
+      }
+    }
+  },
+  {
+    "kind": "table",
+    "signature": "bank.bom.table.v1",
+    "label": "Bank of Maharashtra statement (CSV/Excel)",
+    "source_kind": "bank",
+    "source_app": "bom",
+    "priority": 128,
+    "config": {
+      "sourceKind": "bank",
+      "sourceApp": "bom",
+      "verified": false,
+      "id": "bank.bom.table.v1",
+      "label": "Bank of Maharashtra statement (CSV/Excel)",
+      "reader": "table",
+      "table": {
+        "headerMatch": [
+          "particulars",
+          "cheque reference no",
+          "debit",
+          "credit"
+        ],
+        "columns": {
+          "date": [
+            "date"
+          ],
+          "narration": [
+            "particulars"
+          ],
+          "reference": [
+            "cheque reference no"
+          ],
+          "balance": [
+            "balance"
+          ]
+        },
+        "amount": {
+          "mode": "split",
+          "debit": [
+            "debit"
+          ],
+          "credit": [
+            "credit"
+          ]
+        },
+        "dateFormats": [
+          "dd/MM/yyyy",
+          "dd-MM-yyyy",
+          "dd/MM/yy",
+          "dd-MM-yy",
+          "d MMM yyyy",
+          "dd MMM yyyy",
+          "dd-MMM-yyyy",
+          "dd-MMM-yy"
+        ]
+      }
+    }
+  },
+  {
+    "kind": "text",
+    "signature": "bank.bom.pdf.v1",
+    "label": "Bank of Maharashtra statement (PDF)",
+    "source_kind": "bank",
+    "source_app": "bom",
+    "priority": 129,
+    "config": {
+      "sourceKind": "bank",
+      "sourceApp": "bom",
+      "verified": false,
+      "id": "bank.bom.pdf.v1",
+      "label": "Bank of Maharashtra statement (PDF)",
+      "reader": "pdf_text",
+      "text": {
+        "detect": [
+          "\\bBank\\s+of\\s+Maharashtra\\b"
+        ],
+        "detectWithinLines": 15,
+        "recordStart": "^(?:\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})\\b",
+        "ignoreLines": [
+          "^Page \\d+",
+          "^(?:Txn|Tran|Transaction|Value|Post)?\\s*Date\\b",
+          "statement of account",
+          "computer generated"
+        ],
+        "fields": {
+          "date": "^(?<date>\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})",
+          "amount": "(?<amount>[\\d,]+\\.\\d{2})\\s*(?:Dr|Cr)?\\s+(?<balance>[\\d,]+\\.\\d{2})\\s*(?:Dr|Cr)?\\s*$",
+          "narration": "^(?:\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})\\s+(?:(?:\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})\\s+)?(?<narration>.+?)\\s+[\\d,]+\\.\\d{2}",
+          "debitWhen": "UPI/DR|\\bDR\\b|TO TRANSFER|WITHDRAWAL|\\bATM\\b|\\bPOS\\b|DEBIT",
+          "creditWhen": "UPI/CR|\\bCR\\b|BY TRANSFER|DEPOSIT|REFUND|REVERSAL|SALARY|INTEREST|CREDIT"
+        },
+        "dateFormats": [
+          "dd/MM/yyyy",
+          "dd-MM-yyyy",
+          "dd/MM/yy",
+          "dd-MM-yy",
+          "d MMM yyyy",
+          "dd MMM yyyy",
+          "dd-MMM-yyyy",
+          "dd-MMM-yy"
+        ],
+        "directionFromBalance": true
+      }
+    }
+  },
+  {
+    "kind": "table",
+    "signature": "bank.psb.table.v1",
+    "label": "Punjab & Sind Bank statement (CSV/Excel)",
+    "source_kind": "bank",
+    "source_app": "psb",
+    "priority": 130,
+    "config": {
+      "sourceKind": "bank",
+      "sourceApp": "psb",
+      "verified": false,
+      "id": "bank.psb.table.v1",
+      "label": "Punjab & Sind Bank statement (CSV/Excel)",
+      "reader": "table",
+      "table": {
+        "headerMatch": [
+          "txn date",
+          "description",
+          "debit",
+          "credit"
+        ],
+        "columns": {
+          "date": [
+            "txn date"
+          ],
+          "narration": [
+            "description"
+          ],
+          "balance": [
+            "balance"
+          ]
+        },
+        "amount": {
+          "mode": "split",
+          "debit": [
+            "debit"
+          ],
+          "credit": [
+            "credit"
+          ]
+        },
+        "dateFormats": [
+          "dd/MM/yyyy",
+          "dd-MM-yyyy",
+          "dd/MM/yy",
+          "dd-MM-yy",
+          "d MMM yyyy",
+          "dd MMM yyyy",
+          "dd-MMM-yyyy",
+          "dd-MMM-yy"
+        ]
+      }
+    }
+  },
+  {
+    "kind": "text",
+    "signature": "bank.psb.pdf.v1",
+    "label": "Punjab & Sind Bank statement (PDF)",
+    "source_kind": "bank",
+    "source_app": "psb",
+    "priority": 131,
+    "config": {
+      "sourceKind": "bank",
+      "sourceApp": "psb",
+      "verified": false,
+      "id": "bank.psb.pdf.v1",
+      "label": "Punjab & Sind Bank statement (PDF)",
+      "reader": "pdf_text",
+      "text": {
+        "detect": [
+          "\\bPunjab\\s+&\\s+Sind\\s+Bank\\b"
+        ],
+        "detectWithinLines": 15,
+        "recordStart": "^(?:\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})\\b",
+        "ignoreLines": [
+          "^Page \\d+",
+          "^(?:Txn|Tran|Transaction|Value|Post)?\\s*Date\\b",
+          "statement of account",
+          "computer generated"
+        ],
+        "fields": {
+          "date": "^(?<date>\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})",
+          "amount": "(?<amount>[\\d,]+\\.\\d{2})\\s*(?:Dr|Cr)?\\s+(?<balance>[\\d,]+\\.\\d{2})\\s*(?:Dr|Cr)?\\s*$",
+          "narration": "^(?:\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})\\s+(?:(?:\\d{1,2}[/-](?:\\d{1,2}|[A-Za-z]{3})[/-]\\d{2,4}|\\d{1,2} [A-Za-z]{3} \\d{4})\\s+)?(?<narration>.+?)\\s+[\\d,]+\\.\\d{2}",
+          "debitWhen": "UPI/DR|\\bDR\\b|TO TRANSFER|WITHDRAWAL|\\bATM\\b|\\bPOS\\b|DEBIT",
+          "creditWhen": "UPI/CR|\\bCR\\b|BY TRANSFER|DEPOSIT|REFUND|REVERSAL|SALARY|INTEREST|CREDIT"
+        },
+        "dateFormats": [
+          "dd/MM/yyyy",
+          "dd-MM-yyyy",
+          "dd/MM/yy",
+          "dd-MM-yy",
+          "d MMM yyyy",
+          "dd MMM yyyy",
+          "dd-MMM-yyyy",
+          "dd-MMM-yy"
+        ],
+        "directionFromBalance": true
+      }
+    }
+  }
+]

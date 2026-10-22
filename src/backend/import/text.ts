@@ -1,4 +1,5 @@
 import "server-only";
+import { createHash } from "node:crypto";
 
 /** Lower-case, collapse whitespace, strip punctuation: "Withdrawal Amt. (INR)" → "withdrawal amt inr". */
 export function normalizeHeader(value: string): string {
@@ -22,3 +23,18 @@ export const nullIfEmpty = (v: string | undefined | null): string | null => {
   const t = v?.trim();
   return t ? t : null;
 };
+
+/**
+ * Identity of a PDF statement layout for the shared layouts table: a SHA-256 of its first header
+ * lines with digits removed. Only the hash is stored, because those lines can hold a customer's
+ * name or address.
+ */
+export function textLayoutFingerprint(lines: string[], take = 8): string {
+  const head = lines
+    .slice(0, 30)
+    .map((l) => normalizeHeader(l.replace(/\d+/g, " ")))
+    .filter((l) => l.length >= 3)
+    .slice(0, take)
+    .join("|");
+  return `sha256:${createHash("sha256").update(head).digest("hex")}`;
+}

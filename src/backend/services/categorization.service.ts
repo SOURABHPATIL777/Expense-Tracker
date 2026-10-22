@@ -1,10 +1,13 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
 import { getAdminClient, type Db } from "@/backend/supabase/clients";
-import { CategoriesRepository, MerchantMapRepository, RulesRepository } from "@/backend/repositories/categorization.repository";
+import { CategoriesRepository, RulesRepository } from "@/backend/repositories/categorization.repository";
+import { CategoryMapRepository } from "@/backend/repositories/categoryMap.repository";
 import { TransactionsRepository } from "@/backend/repositories/transactions.repository";
 import { toCategoryDto, toCategoryRow, toRuleDto, toRuleRow } from "@/backend/mappers/transactions.mapper";
-import { merchantKey } from "@/backend/domain/merchant";
+import { matchCategory, normalizeKeyword } from "@/backend/domain/categoryMap";
+import { looksLikeIndividual } from "@/backend/domain/individual";
+import { matchTexts } from "./classification.service";
 import { enqueueJob } from "@/backend/jobs/queue";
 import { kickWorker } from "@/backend/jobs/worker";
 import type { TransactionKind } from "@/backend/constants/enums.constants";
@@ -48,8 +51,9 @@ export function rulesService(db: Db) {
 }
 
 /**
- * A user's manual category choice: locks the transaction against rules/AI and teaches the
- * merchant map so the same merchant is categorised the same way next time.
+ * A user's manual category choice: locks the transaction against rules/AI and records the choice
+ * in the user's own category map, so the same merchant is categorised this way from now on.
+ * Payments to people are not mapped (a person isn't a merchant); a rule handles a specific person.
  */
 export async function recategorize(db: Db, userId: string, transactionId: string, categoryId: string, kind?: TransactionKind): Promise<void> {
   const category = await new CategoriesRepository(db).findById(userId, categoryId);
@@ -64,12 +68,11 @@ export async function recategorize(db: Db, userId: string, transactionId: string
     user_locked: true,
     review_status: "ok",
   });
-  const key = merchantKey(tx.merchant_normalized ?? tx.merchant_raw, tx.counterparty_vpa);
-  if (!key) return;
-  await new MerchantMapRepository(db).learn(userId, {
-    merchant_key: key,
-    merchant_name: tx.merchant_normalized ?? tx.merchant_raw,
-    category_id: category.id,
-    transaction_kind: kind ?? null,
-  });
+
+  if (looksLikeIndividual({ merchant: tx.merchant_normalized ?? tx.merchant_raw, vpa: tx.counterparty_vpa, narration: tx.narration })) return;
+  const map = new CategoryMapRepository(db);
+  // Reuse the keyword that identified this merchant; otherwise learn its name.
+  const matched = matchCategory(matchTexts(tx), await map.entriesFor(userId));
+  const keyword = matched?.keyword ?? normalizeKeyword(tx.merchant_normalized ?? tx.merchant_raw);
+  if (keyword) await map.learnForUser(userId, keyword, category.name, kind ?? null);
 }

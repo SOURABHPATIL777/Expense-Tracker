@@ -89,7 +89,7 @@ export default function DashboardPage() {
           >
             {explain.error ? (
               <Alert tone="warning">
-                {explain.error.message} {explain.error.code.startsWith("LLM") && <Link href={PAGE_ROUTES.settingsAi}>Set up the summary model</Link>}
+                {explain.error.message}
               </Alert>
             ) : summary?.key === rangeKey ? (
               <div className={styles.summary}>
@@ -101,7 +101,7 @@ export default function DashboardPage() {
                 </ul>
               </div>
             ) : (
-              <p className={styles.muted}>Optional. Uses the model you chose for “Monthly summary” in AI settings.</p>
+              <p className={styles.muted}>Optional. Written by AI from the totals above.</p>
             )}
           </Card>
 

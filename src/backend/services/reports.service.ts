@@ -72,7 +72,7 @@ export function reportsService(db: Db) {
     const { rows } = await new ImportsRepository(db).list(userId, { page: 1, pageSize: RECENT_IMPORTS }, (q) => q.eq("status", "completed"));
     const latest = new Map<string, SourceStatusDto>();
     for (const r of rows) {
-      if (latest.has(r.source_app)) continue;
+      if (!r.source_app || latest.has(r.source_app)) continue;
       latest.set(r.source_app, { sourceApp: r.source_app as SourceApp, lastImportedAt: r.completed_at ?? r.created_at, coveredUntil: r.period_end });
     }
     return [...latest.values()];
@@ -96,7 +96,7 @@ export function reportsService(db: Db) {
     /** AI-written explanation of SQL-computed totals; it receives formatted figures, never raw transactions. */
     async summary(userId: string, range: ReportRange): Promise<SummaryDto> {
       const [t, c] = await Promise.all([totals(range), categories(userId, range)]);
-      const out = await runLlmTask(db, {
+      const out = await runLlmTask({
         userId,
         task: "monthly_summary",
         schema: summarySchema,

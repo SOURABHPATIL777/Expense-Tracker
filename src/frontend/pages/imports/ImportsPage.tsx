@@ -7,20 +7,13 @@ import { Card } from "@/frontend/components/Card/Card";
 import { DataTable, type Column } from "@/frontend/components/DataTable/DataTable";
 import { DateText } from "@/frontend/components/DateText/DateText";
 import { FileDropzone } from "@/frontend/components/FileDropzone/FileDropzone";
-import { Select } from "@/frontend/components/Select/Select";
-import { SourcePicker } from "@/frontend/components/SourcePicker/SourcePicker";
-import { StatusBadge } from "@/frontend/components/StatusBadge/StatusBadge";
-import { Alert } from "@/frontend/components/Alert/Alert";
-import { useApi } from "@/frontend/hooks/useApi";
+import { StatusBadge, Badge } from "@/frontend/components/StatusBadge/StatusBadge";
 import { usePaginatedList } from "@/frontend/hooks/usePaginatedList";
 import { useMutation } from "@/frontend/hooks/useMutation";
 import { uploadStatement, type UploadStage } from "@/frontend/lib/uploadStatement";
 import { formatDate } from "@/frontend/lib/format";
 import { API_ROUTES, PAGE_ROUTES } from "@/shared/constants/routes";
 import { IMPORT_STATUS_LABELS, SOURCE_APP_LABELS } from "@/shared/constants/labels";
-import { acceptedExtensions } from "@/shared/constants/sources";
-import type { SourceApp } from "@/shared/constants/enums";
-import type { AccountDto } from "@/shared/schemas/accounts";
 import type { ImportDto } from "@/shared/schemas/imports";
 import styles from "./ImportsPage.module.css";
 
@@ -38,7 +31,10 @@ const columns: Column<ImportDto>[] = [
     render: (i) => (
       <div className={styles.file}>
         <strong>{i.fileName}</strong>
-        <span className={styles.muted}>{SOURCE_APP_LABELS[i.sourceApp]}</span>
+        <span className={styles.muted}>
+          {i.sourceApp ? SOURCE_APP_LABELS[i.sourceApp] : "Detecting source…"}
+          {i.readByAi && " · read by AI"}
+        </span>
       </div>
     ),
   },
@@ -55,36 +51,28 @@ const columns: Column<ImportDto>[] = [
 
 export default function ImportsPage() {
   const router = useRouter();
-  const [source, setSource] = useState<SourceApp | null>(null);
-  const [accountId, setAccountId] = useState("");
   const [stage, setStage] = useState<UploadStage>();
-  const accounts = useApi<AccountDto[]>(API_ROUTES.accounts);
   const history = usePaginatedList<ImportDto>(API_ROUTES.imports);
 
-  const upload = useMutation(
-    (file: File) => uploadStatement(file, { sourceApp: source!, accountId, onStage: setStage }),
-    { onSuccess: (imp) => router.push(PAGE_ROUTES.importReview(imp.id)) },
-  );
-
-  const accountOptions = (accounts.data ?? []).map((a) => ({ value: a.id, label: a.label }));
+  const upload = useMutation((file: File) => uploadStatement(file, { onStage: setStage }), {
+    onSuccess: (imp) => router.push(PAGE_ROUTES.importReview(imp.id)),
+  });
 
   return (
     <>
-      <PageHeader title="Imports" description="Upload statements from your UPI apps or bank. Payments that appear in both are matched by UTR, not double counted." />
+      <PageHeader
+        title="Imports"
+        description="Drop a statement and it's imported automatically: we recognise the app or bank and its layout. Payments that appear in both your UPI app and bank are matched by UTR, not double counted."
+      />
 
       <div className={styles.layout}>
-        <Card title="New import" description="1. Choose where the statement is from  2. Upload the file">
+        <Card title="New import">
           <div className={styles.stack}>
-            <SourcePicker value={source} onChange={setSource} />
-            {accountOptions.length > 0 && (
-              <Select label="Account (optional)" placeholder="Not linked to an account" options={accountOptions} value={accountId} onChange={(e) => setAccountId(e.target.value)} />
-            )}
-            {source ? (
-              <FileDropzone onFile={(f) => upload.run(f)} disabled={upload.pending} accept={acceptedExtensions(source)} />
-            ) : (
-              <Alert tone="neutral">Pick PhonePe, Google Pay, Paytm or your bank to continue.</Alert>
-            )}
+            <FileDropzone onFile={(f) => upload.run(f)} disabled={upload.pending} hint="PhonePe, Google Pay, Paytm or any bank · CSV, Excel or PDF · up to 10 MB" />
             {upload.pending && stage && <p className={styles.stage}>{STAGE_LABELS[stage]}</p>}
+            <p className={styles.muted}>
+              <Badge>Tip</Badge> Unfamiliar layouts are worked out by AI the first time and remembered for everyone after that.
+            </p>
           </div>
         </Card>
 

@@ -1,7 +1,6 @@
 import "server-only";
-import type { CategoryRow, LlmConfigRow, RefundRow, ReviewItemRow, RuleRow, TransactionRow } from "@/backend/repositories/types";
+import type { CategoryRow, RefundRow, ReviewItemRow, RuleRow, TransactionRow } from "@/backend/repositories/types";
 import type { CategoryDto, CategoryInput, RuleDto, RuleInput } from "@/shared/schemas/categories";
-import type { LlmConfigDto, LlmTestResultDto } from "@/shared/schemas/llm";
 import type { ReviewItemDto, TransactionSummaryDto } from "@/shared/schemas/review";
 import type { TransactionDto } from "@/shared/schemas/transactions";
 import type { RefundDto } from "@/shared/schemas/refunds";
@@ -35,19 +34,6 @@ export const toRuleRow = (i: Partial<RuleInput>): Partial<RuleRow> => ({
   ...(i.isActive !== undefined && { is_active: i.isActive }),
 });
 
-export const toLlmConfigDto = (r: LlmConfigRow): LlmConfigDto => ({
-  task: r.task,
-  enabled: r.enabled,
-  provider: r.provider,
-  model: r.model,
-  endpointName: r.endpoint_name,
-  temperature: Number(r.temperature),
-  maxOutputTokens: r.max_output_tokens,
-  timeoutMs: r.timeout_ms,
-  allowCloudProcessing: r.allow_cloud_processing,
-  lastTestedAt: r.last_tested_at,
-  lastTest: (r.test_result as LlmTestResultDto | null) ?? null,
-});
 
 export const toTransactionSummary = (t: TransactionRow): TransactionSummaryDto => ({
   id: t.id,

@@ -1,23 +1,19 @@
 import "server-only";
-import { presetById } from "@/backend/import/presets";
 import type { ParsedEvent } from "@/backend/import/types";
 import type { ImportRow, RawEventRow } from "@/backend/repositories/types";
 import type { ImportDto, ImportRowDto } from "@/shared/schemas/imports";
 
 export function toImportDto(r: ImportRow): ImportDto {
-  const preset = r.preset_id ? presetById(r.preset_id) : null;
-  const isMapping = Boolean(r.preset_id?.startsWith("template:") || r.preset_id?.startsWith("mapping:"));
   return {
     id: r.id,
     fileName: r.file_name,
     fileSize: r.file_size,
     sourceKind: r.source_kind,
-    sourceApp: r.source_app as ImportDto["sourceApp"],
+    sourceApp: (r.source_app as ImportDto["sourceApp"]) ?? null,
     accountId: r.account_id,
     status: r.status,
-    presetId: r.preset_id,
-    presetLabel: preset?.label ?? (isMapping ? "Your column mapping" : null),
-    presetVerified: preset ? preset.verified : isMapping ? true : null,
+    detectedLabel: r.detected_label,
+    readByAi: r.read_by_ai,
     errorCode: r.error_code,
     errorMessage: r.error_message,
     counts: {

@@ -18,6 +18,13 @@ export class RawEventsRepository extends BaseRepository<RawEventRow> {
     }
   }
 
+  /** Adds rows without clearing earlier ones (PDFs read by the LLM arrive chunk by chunk). */
+  async appendForImport(userId: string, rows: Array<Omit<RawEventRow, "id" | "user_id" | "created_at">>): Promise<void> {
+    for (let i = 0; i < rows.length; i += WRITE_BATCH) {
+      unwrapMaybe(await this.from().insert(rows.slice(i, i + WRITE_BATCH).map((r) => ({ ...r, user_id: userId }))), "rawEvents.append");
+    }
+  }
+
   listPending(userId: string, importId: string, limit: number): Promise<RawEventRow[]> {
     return this.listAll(userId, (q) => q.eq("import_id", importId).eq("status", "pending").limit(limit));
   }

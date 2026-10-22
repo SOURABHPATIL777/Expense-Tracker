@@ -3,15 +3,19 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { detectConfig, extract } from "@/backend/import/engine";
 import { readCsv } from "@/backend/import/readers/csv";
-import { PRESETS } from "@/backend/import/presets";
-import type { TextRead } from "@/backend/import/types";
+import type { ImportConfig, TextRead } from "@/backend/import/types";
+
+/** Stored layouts as seeded into import_layouts by the auto-import migration. */
+const LAYOUTS: ImportConfig[] = (
+  JSON.parse(readFileSync(join(process.cwd(), "tests/fixtures/layouts.seed.json"), "utf8")) as Array<{ config: ImportConfig }>
+).map((l) => l.config);
 
 const fixture = (name: string) => readFileSync(join(process.cwd(), "tests/fixtures/synthetic", name));
 const lines = (name: string): TextRead => ({ kind: "text", lines: fixture(name).toString("utf8").split("\n").filter(Boolean) });
 
 describe("HDFC CSV (table preset)", () => {
   const read = readCsv(fixture("hdfc.csv"));
-  const config = detectConfig(read, "csv", [...PRESETS], "hdfc");
+  const config = detectConfig(read, "csv", LAYOUTS, "hdfc");
 
   it("detects the HDFC preset past the statement preamble", () => {
     expect(config?.id).toBe("bank.hdfc.table.v1");
@@ -37,7 +41,7 @@ describe("HDFC CSV (table preset)", () => {
 
 describe("Paytm CSV (signed amounts, separate time column)", () => {
   const read = readCsv(fixture("paytm.csv"));
-  const config = detectConfig(read, "csv", [...PRESETS]);
+  const config = detectConfig(read, "csv", LAYOUTS);
 
   it("detects Paytm without a hint", () => {
     expect(config?.id).toBe("upi.paytm.table.v1");
@@ -53,7 +57,7 @@ describe("Paytm CSV (signed amounts, separate time column)", () => {
 
 describe("PhonePe PDF (text preset)", () => {
   const read = lines("phonepe.lines.txt");
-  const config = detectConfig(read, "pdf_text", [...PRESETS], "phonepe");
+  const config = detectConfig(read, "pdf_text", LAYOUTS, "phonepe");
 
   it("detects PhonePe", () => {
     expect(config?.id).toBe("upi.phonepe.pdf.v1");
@@ -76,7 +80,7 @@ describe("PhonePe PDF (text preset)", () => {
 
 describe("Bank PDF (balance-delta direction)", () => {
   const read = lines("sbi.pdf.lines.txt");
-  const config = detectConfig(read, "pdf_text", [...PRESETS], "sbi");
+  const config = detectConfig(read, "pdf_text", LAYOUTS, "sbi");
 
   it("detects SBI's PDF preset over the generic fallback", () => {
     expect(config?.id).toBe("bank.sbi.pdf.v1");
@@ -92,8 +96,15 @@ describe("Bank PDF (balance-delta direction)", () => {
     expect(rows[1].referenceId).toBe("427998765432");
   });
 
-  it("falls back to the generic PDF parser for unknown banks", () => {
+  it("matches no stored layout for an unknown bank's PDF (it goes to the AI reader)", () => {
     const unknown: TextRead = { kind: "text", lines: read.lines.filter((l) => !/State Bank/i.test(l)) };
-    expect(detectConfig(unknown, "pdf_text", [...PRESETS])?.id).toBe("generic.pdf.v1");
+    expect(detectConfig(unknown, "pdf_text", LAYOUTS)).toBeNull();
+  });
+});
+
+describe("layout seed", () => {
+  it("is exactly what the migration inserts into import_layouts", () => {
+    const sql = readFileSync(join(process.cwd(), "supabase/migrations/20261023000001_auto_import.sql"), "utf8");
+    for (const l of LAYOUTS) expect(sql, l.id).toContain(`'${l.id}'`);
   });
 });

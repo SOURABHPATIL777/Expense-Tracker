@@ -16,15 +16,18 @@ export const parseImportJob = defineJob({
   async run({ importId, stage }, ctx) {
     const pipeline = importPipeline(ctx.db, ctx.log);
     // Keys derive from this job's id, so a retried job never schedules its successor twice.
-    const next = () =>
-      ctx.enqueue({ type: "parse_import", payload: { importId, stage: "process" }, idempotencyKey: `import:${importId}:after:${ctx.jobId}` });
+    const next = (nextStage: "extract" | "process") =>
+      ctx.enqueue({ type: "parse_import", payload: { importId, stage: nextStage }, idempotencyKey: `import:${importId}:after:${ctx.jobId}` });
 
     if (stage === "extract") {
-      if ((await pipeline.extractStage(ctx.userId, importId)) === "processing") await next();
+      const status = await pipeline.extractStage(ctx.userId, importId);
+      // `parsing` = a PDF is being read by the AI and has chunks left; `processing` = ready to match.
+      if (status === "parsing") await next("extract");
+      else if (status === "processing") await next("process");
       return;
     }
     const { done } = await pipeline.processStep(ctx.userId, importId);
-    if (!done) return next();
+    if (!done) return next("process");
     for (const type of AFTER_IMPORT_JOBS) {
       await ctx.enqueue({ type, payload: { importId }, idempotencyKey: `${type}:import:${importId}` });
     }

@@ -2,7 +2,7 @@ import "server-only";
 import { RPC, TABLES } from "@/backend/constants/db.constants";
 import { unwrapMaybe } from "@/backend/errors/AppError";
 import { BaseRepository } from "./BaseRepository";
-import type { ImportRow, ImportTemplateRow } from "./types";
+import type { ImportRow } from "./types";
 
 export class ImportsRepository extends BaseRepository<ImportRow> {
   protected readonly table = TABLES.IMPORTS;
@@ -28,19 +28,3 @@ export class ImportsRepository extends BaseRepository<ImportRow> {
   }
 }
 
-export class ImportTemplatesRepository extends BaseRepository<ImportTemplateRow> {
-  protected readonly table = TABLES.IMPORT_TEMPLATES;
-
-  findBySignatures(userId: string, signatures: string[]) {
-    if (signatures.length === 0) return Promise.resolve([]);
-    return this.listAll(userId, (q) => q.in("header_signature", signatures));
-  }
-
-  async upsert(userId: string, values: Omit<ImportTemplateRow, "id" | "user_id" | "created_at" | "updated_at">): Promise<ImportTemplateRow> {
-    const result = await this.from()
-      .upsert({ ...values, user_id: userId }, { onConflict: "user_id,header_signature" })
-      .select()
-      .single();
-    return unwrapMaybe(result, "importTemplates.upsert") as ImportTemplateRow;
-  }
-}
