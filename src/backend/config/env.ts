@@ -28,6 +28,9 @@ const ollamaEndpoints = z
     return out;
   });
 
+/** Used when only OLLAMA_API_KEY is set: Ollama's hosted API. */
+export const OLLAMA_CLOUD_ENDPOINT = { name: "cloud", url: "https://ollama.com/api" } as const;
+
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   APP_URL: z.url(),
@@ -48,7 +51,13 @@ const envSchema = z.object({
   XAI_API_KEY: optionalSecret,
   OLLAMA_ENDPOINTS: ollamaEndpoints,
   OLLAMA_API_KEY: optionalSecret,
-});
+})
+  // A key with no endpoint list means "use Ollama Cloud" — the SDK is then called with just the key.
+  .transform((env) =>
+    Object.keys(env.OLLAMA_ENDPOINTS).length === 0 && env.OLLAMA_API_KEY
+      ? { ...env, OLLAMA_ENDPOINTS: { [OLLAMA_CLOUD_ENDPOINT.name]: OLLAMA_CLOUD_ENDPOINT.url } }
+      : env,
+  );
 
 export type Env = z.infer<typeof envSchema>;
 

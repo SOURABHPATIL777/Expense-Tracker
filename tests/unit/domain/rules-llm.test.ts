@@ -74,6 +74,15 @@ describe("cloud consent", () => {
     });
   });
 
+  it("uses Ollama Cloud when only an API key is configured", async () => {
+    process.env.OLLAMA_ENDPOINTS = "";
+    process.env.OLLAMA_API_KEY = "test-ollama-key";
+    vi.resetModules();
+    const { getEnv } = await import("@/backend/config/env");
+    expect(getEnv().OLLAMA_ENDPOINTS).toEqual({ cloud: "https://ollama.com/api" });
+    delete process.env.OLLAMA_API_KEY;
+  });
+
   it("requires an endpoint name for Ollama configs", () => {
     const base = { task: "categorize", provider: "ollama", model: "qwen3.5:9b" };
     expect(llmConfigInputSchema.safeParse(base).success).toBe(false);
