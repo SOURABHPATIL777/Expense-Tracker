@@ -10,6 +10,8 @@ export const API_ROUTES = {
     logout: `${API_BASE}/auth/logout`,
     me: `${API_BASE}/auth/me`,
     callback: `${API_BASE}/auth/callback`,
+    resend: `${API_BASE}/auth/resend`,
+    realtime: `${API_BASE}/auth/realtime`,
   },
   accounts: `${API_BASE}/accounts`,
   account: (id: string) => `${API_BASE}/accounts/${id}`,

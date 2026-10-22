@@ -13,6 +13,7 @@ html {
 
 body {
   margin: 0;
+  overflow-wrap: break-word;
   min-height: 100dvh;
   background: var(--color-bg);
   color: var(--color-text);

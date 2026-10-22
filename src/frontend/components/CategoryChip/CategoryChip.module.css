@@ -2,7 +2,16 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
+  min-width: 0;
+  max-width: 100%;
   white-space: nowrap;
+}
+
+/* Long category names end in "…" instead of running past their card. */
+.name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .dot {

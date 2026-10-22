@@ -145,7 +145,7 @@
 }
 
 .file strong {
-  max-width: 22rem;
+  max-width: min(22rem, 100%);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -173,7 +173,7 @@
     padding-left: calc(2.25rem + var(--space-3));
   }
 
-  .file strong {
-    max-width: 70vw;
+  .file {
+    max-width: 100%;
   }
 }

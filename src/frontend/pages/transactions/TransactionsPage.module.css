@@ -7,7 +7,7 @@
 
 .name {
   overflow: hidden;
-  max-width: 24rem;
+  max-width: min(24rem, 100%);
   font-weight: var(--weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;

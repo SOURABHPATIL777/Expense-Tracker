@@ -20,6 +20,8 @@ export const toRuleDto = (r: RuleRow): RuleDto => ({
   pattern: r.pattern,
   categoryId: r.category_id,
   transactionKind: r.transaction_kind,
+  direction: r.direction,
+  origin: r.origin,
   priority: r.priority,
   isActive: r.is_active,
 });
@@ -30,6 +32,7 @@ export const toRuleRow = (i: Partial<RuleInput>): Partial<RuleRow> => ({
   ...(i.pattern !== undefined && { pattern: i.pattern }),
   ...("categoryId" in i && { category_id: i.categoryId ?? null }),
   ...("transactionKind" in i && { transaction_kind: i.transactionKind ?? null }),
+  ...("direction" in i && { direction: i.direction ?? null }),
   ...(i.priority !== undefined && { priority: i.priority }),
   ...(i.isActive !== undefined && { is_active: i.isActive }),
 });

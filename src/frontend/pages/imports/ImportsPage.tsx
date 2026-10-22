@@ -15,6 +15,7 @@ import { DeleteImportDialog } from "@/frontend/components/DeleteImportDialog/Del
 import { StatusBadge, Badge } from "@/frontend/components/StatusBadge/StatusBadge";
 import { usePaginatedList } from "@/frontend/hooks/usePaginatedList";
 import { useUploadQueue } from "@/frontend/hooks/useUploadQueue";
+import { useImportEvents } from "@/frontend/hooks/useImportEvents";
 import type { UploadItem, UploadItemStatus } from "@/frontend/lib/uploadQueue";
 import type { UploadStage } from "@/frontend/lib/uploadStatement";
 import { formatDate } from "@/frontend/lib/format";
@@ -118,6 +119,8 @@ export default function ImportsPage() {
   useEffect(() => {
     if (doneCount) reloadHistory();
   }, [doneCount, reloadHistory]);
+  // Status changes (reading → completed) arrive over the socket.
+  useImportEvents(reloadHistory);
 
   useEffect(() => {
     const item = uploads.items.find((i) => i.id === solo.current);

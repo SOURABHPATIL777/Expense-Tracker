@@ -15,5 +15,13 @@ export class RulesRepository extends BaseRepository<RuleRow> {
   listActive(userId: string) {
     return this.listAll(userId, (q) => q.eq("is_active", true));
   }
+
+  /** The rule the app keeps for one counterparty and direction (created from the user's edits). */
+  findAuto(userId: string, field: RuleRow["field"], pattern: string, direction: RuleRow["direction"]) {
+    return this.findOptional(userId, (q) => {
+      const base = q.eq("origin", "auto").eq("field", field).ilike("pattern", pattern.replace(/[\\%_]/g, (c) => `\\${c}`));
+      return direction ? base.eq("direction", direction) : base.is("direction", null);
+    });
+  }
 }
 

@@ -6,6 +6,7 @@
 
 /* ---- Brand ---------------------------------------------------------------- */
 .brand {
+  flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
@@ -249,8 +250,23 @@
     -webkit-backdrop-filter: saturate(180%) blur(14px);
   }
 
+  .topbar {
+    gap: var(--space-3);
+  }
+
+  /* Between the brand and the avatar, taking whatever width is left. */
+  .topPill {
+    flex: 0 1 auto;
+    margin-left: auto;
+  }
+
   .main {
     padding: var(--space-2) var(--space-4) calc(var(--tabbar-height) + var(--safe-bottom) + var(--space-5));
+  }
+
+  /* Shell safety net: page content may shrink below its intrinsic width instead of widening the page. */
+  .main > * {
+    min-width: 0;
   }
 
   .tabbar {

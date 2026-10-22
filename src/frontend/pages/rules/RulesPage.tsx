@@ -12,8 +12,8 @@ import { useCategories } from "@/frontend/hooks/useCategories";
 import { useMutation } from "@/frontend/hooks/useMutation";
 import { api } from "@/frontend/lib/apiClient";
 import { API_ROUTES } from "@/shared/constants/routes";
-import { RULE_FIELDS, RULE_OPERATORS, TRANSACTION_KINDS } from "@/shared/constants/enums";
-import { RULE_FIELD_LABELS, RULE_OPERATOR_LABELS, TRANSACTION_KIND_LABELS } from "@/shared/constants/labels";
+import { DIRECTIONS, RULE_FIELDS, RULE_OPERATORS, TRANSACTION_KINDS } from "@/shared/constants/enums";
+import { RULE_DIRECTION_LABELS, RULE_FIELD_LABELS, RULE_OPERATOR_LABELS, TRANSACTION_KIND_LABELS } from "@/shared/constants/labels";
 import { ruleFormSchema, type RuleDto, type RuleInput } from "@/shared/schemas/categories";
 import styles from "./RulesPage.module.css";
 
@@ -28,7 +28,9 @@ export default function RulesPage() {
       header: "When",
       render: (r) => (
         <span>
+          {r.direction && `${RULE_DIRECTION_LABELS[r.direction]}: `}
           {RULE_FIELD_LABELS[r.field]} {RULE_OPERATOR_LABELS[r.operator]} <code className={styles.pattern}>{r.pattern}</code>
+          {r.origin === "auto" && <span className={styles.auto}> · from your edits</span>}
         </span>
       ),
     },
@@ -64,6 +66,14 @@ export default function RulesPage() {
         <>
           <FormField name="field" label="Look at" type="select" options={optionsFrom(RULE_FIELDS, RULE_FIELD_LABELS)} defaultValue={e?.field ?? "merchant"} />
           <FormField name="operator" label="Match" type="select" options={optionsFrom(RULE_OPERATORS, RULE_OPERATOR_LABELS)} defaultValue={e?.operator ?? "contains"} />
+          <FormField
+            name="direction"
+            label="Applies to"
+            type="select"
+            placeholder="Money in and out"
+            options={optionsFrom(DIRECTIONS, RULE_DIRECTION_LABELS)}
+            defaultValue={e?.direction ?? ""}
+          />
           <FormField name="pattern" label="Text" placeholder="e.g. swiggy" defaultValue={e?.pattern} hint="Not case sensitive." required />
           <FormField name="categoryId" label="Set category" type="select" placeholder="Don't change" options={cats.options} defaultValue={e?.categoryId ?? ""} />
           <FormField

@@ -28,6 +28,10 @@ export const JOBS = {
   BACKOFF_MAX_SECONDS: 60 * 60,
   /** Worker stops claiming new jobs after this much wall-clock time to stay under the function limit. */
   WORKER_BUDGET_MS: 45_000,
+  /** Hard stop for any job started in a pass: the function limit (60 s, vercel.json) minus a margin. */
+  INVOCATION_LIMIT_MS: 55_000,
+  /** No job is started with less than this left before INVOCATION_LIMIT_MS. */
+  MIN_JOB_START_MS: 20_000,
   /** Minimum gap between traffic-triggered worker passes on one server instance. */
   OPPORTUNISTIC_INTERVAL_MS: 60_000,
   /** Kept short so ordinary API calls don't hold their function open for long. */
@@ -36,6 +40,12 @@ export const JOBS = {
   CLASSIFY_PER_STEP: 50,
   LLM_BATCH_SIZE: 20,
 } as const;
+
+/** Statement text that marks a credit as salary (matched on credits only, case-insensitive, whole words). */
+export const SALARY_PATTERNS: readonly RegExp[] = [/\bsalary\b/i, /\bsal\b/i, /\bsal(ary)?[ -]?cr(edit)?\b/i, /\bpayroll\b/i, /\bstipend\b/i, /\/sal\//i];
+
+/** Credits that look like salary from the same payer in recent months (sent to the LLM as a hint). */
+export const SALARY_HINT = { LOOKBACK_DAYS: 100, AMOUNT_TOLERANCE: 0.25 } as const;
 
 export const MATCHING = {
   /** Cross-source duplicate window when no UTR is available. */

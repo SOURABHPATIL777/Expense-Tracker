@@ -12,6 +12,7 @@ import { istDateRange } from "@/backend/domain/period";
 import { pageMeta } from "./paginate";
 import { audit } from "./auditLog";
 import { recategorize } from "./categorization.service";
+import { spreadManualEdit } from "./counterpartyRules.service";
 import type { SourceKind } from "@/shared/constants/enums";
 import type { TransactionDetailDto, TransactionListQuery, UpdateTransactionInput } from "@/shared/schemas/transactions";
 
@@ -82,8 +83,10 @@ export function transactionsService(db: Db) {
         ...(input.userLocked !== undefined && { user_locked: input.userLocked }),
       };
       if (Object.keys(patch).length > 0) await repo.update(userId, id, patch);
-      await audit(db, { userId, action: AUDIT_ACTIONS.TRANSACTION_UPDATED, entityType: "transaction", entityId: id, metadata: { fields: Object.keys(input) } });
-      return this.get(userId, id);
+      // The same UPI ID / account in the same direction follows this edit, now and in future imports.
+      const alsoUpdated = await spreadManualEdit(db, userId, id, { categoryId: input.categoryId, kind: input.transactionKind });
+      await audit(db, { userId, action: AUDIT_ACTIONS.TRANSACTION_UPDATED, entityType: "transaction", entityId: id, metadata: { fields: Object.keys(input), alsoUpdated } });
+      return { ...(await this.get(userId, id)), alsoUpdated };
     },
   };
 }

@@ -12,3 +12,9 @@ export type SignupInput = z.infer<typeof signupSchema>;
 
 export type MeDto = { id: string; email: string | null; displayName: string | null; isAnonymous: boolean };
 export type SignupResultDto = { needsEmailConfirmation: boolean };
+
+export const resendSchema = z.object({ email: emailSchema });
+export type ResendInput = z.infer<typeof resendSchema>;
+
+/** What the browser needs to open its Realtime socket (the user's own short-lived access token). */
+export type RealtimeTokenDto = { url: string; publishableKey: string; accessToken: string; userId: string; expiresAt: number };

@@ -18,7 +18,15 @@ export const createImportSchema = z
   });
 export type CreateImportInput = z.infer<typeof createImportSchema>;
 
-export const importListQuerySchema = paginationQuerySchema.extend({ status: z.enum(IMPORT_STATUSES).optional() });
+/** Imports still being uploaded, read or matched (shown as "in progress" across the app). */
+export const ACTIVE_IMPORT_STATUSES = ["uploaded", "queued", "parsing", "processing"] as const satisfies readonly ImportStatus[];
+
+export const importListQuerySchema = paginationQuerySchema.extend({
+  status: z.enum(IMPORT_STATUSES).optional(),
+  /** Only imports in progress (ACTIVE_IMPORT_STATUSES). */
+  active: z.enum(["true", "false"]).optional(),
+});
+export type ImportListQuery = z.infer<typeof importListQuerySchema>;
 
 export const deleteImportQuerySchema = z.object({ mode: z.enum(IMPORT_DELETE_MODES).default("all") });
 

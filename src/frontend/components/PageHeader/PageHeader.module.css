@@ -17,6 +17,8 @@
   font-weight: var(--weight-extrabold);
   letter-spacing: -0.025em;
   line-height: 1.2;
+  /* Long unbroken names (statement file names) wrap instead of widening the page. */
+  overflow-wrap: anywhere;
 }
 
 .description {
@@ -24,6 +26,7 @@
   max-width: 62ch;
   color: var(--color-text-muted);
   font-size: var(--text-sm);
+  overflow-wrap: anywhere;
 }
 
 .actions {

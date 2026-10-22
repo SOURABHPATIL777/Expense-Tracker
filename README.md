@@ -97,6 +97,21 @@ Node 20.9+ is required; Node 22+ is recommended.
 - **Check it:** `npm run llm:check` sends one structured-output test to the configured model.
 - Without a reachable Ollama, imports with stored layouts still work. Unknown layouts, unknown PDFs and AI categorisation retry later.
 
+### 5. Email confirmation (Supabase Auth)
+Confirmation links point at the site the user signed up on. For them to work:
+1. In Vercel, set `APP_URL` to the production URL (e.g. `https://expensetracker-phi-rust.vercel.app`).
+2. In Supabase → **Authentication → URL Configuration**:
+   - **Site URL**: the production URL;
+   - **Redirect URLs**: add `https://<production>/api/v1/auth/callback` and `http://localhost:3000/api/v1/auth/callback`.
+3. Recommended, in **Authentication → Email Templates → Confirm signup**, make the link:
+   `{{ .RedirectTo }}?token_hash={{ .TokenHash }}&type=email`
+   That link works on any device or browser, and isn't used up when an email app scans links before you click.
+
+An expired or already-used link lands on the sign-in page, which offers to send a new one.
+
+### 6. Live progress (Supabase Realtime)
+Import progress is pushed to the browser over Supabase Realtime instead of polling. The migration adds `imports` to the `supabase_realtime` publication; nothing else to configure. If the socket can't connect, the app falls back to checking every 20 s.
+
 ## Security & privacy notes
 
 - **Never asked for:** UPI PIN, OTP or bank password. Statements are uploaded by the user.

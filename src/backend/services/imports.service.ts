@@ -17,7 +17,10 @@ import { statementBucket, statementKey, statementStorage } from "./storage";
 import { UploadedFilesRepository } from "@/backend/repositories/uploadedFiles.repository";
 import { importPipeline } from "./importPipeline.service";
 import type { PaginationQuery } from "@/shared/schemas/common";
-import type { CreateImportInput, CreateImportResultDto, ImportDto } from "@/shared/schemas/imports";
+import { ACTIVE_IMPORT_STATUSES, type CreateImportInput, type CreateImportResultDto, type ImportDto, type ImportListQuery } from "@/shared/schemas/imports";
+
+/** An import still "uploaded" after this long was abandoned by the browser. */
+const UPLOAD_STALL_MS = 2 * 60_000;
 
 /** Why the same file can't be uploaded again, by the existing import's status. */
 const DUPLICATE_MESSAGES: Partial<Record<ImportStatus, string>> = {
@@ -53,8 +56,16 @@ export function importsService(db: Db, log: Logger) {
   }
 
   return {
-    async list(userId: string, page: PaginationQuery) {
-      const { rows, total } = await imports.list(userId, page);
+    async list(userId: string, page: ImportListQuery) {
+      const { rows, total } = await imports.list(userId, page, (q) => {
+        // An upload the browser never finished isn't "in progress" once it has gone quiet.
+        if (page.active === "true") {
+          const stalledBefore = new Date(Date.now() - UPLOAD_STALL_MS).toISOString();
+          const working = ACTIVE_IMPORT_STATUSES.filter((s) => s !== "uploaded").join(",");
+          return q.or(`status.in.(${working}),and(status.eq.uploaded,created_at.gt.${stalledBefore})`);
+        }
+        return page.status ? q.eq("status", page.status) : q;
+      });
       return { items: rows.map(toImportDto), meta: pageMeta(page, total) };
     },
 

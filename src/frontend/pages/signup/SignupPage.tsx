@@ -7,6 +7,7 @@ import { AuthCard } from "@/frontend/components/AuthCard/AuthCard";
 import { Form } from "@/frontend/components/Form/Form";
 import { FormField } from "@/frontend/components/Form/FormField";
 import { Alert } from "@/frontend/components/Alert/Alert";
+import { ResendConfirmation } from "@/frontend/components/ResendConfirmation/ResendConfirmation";
 import { api } from "@/frontend/lib/apiClient";
 import { API_ROUTES, PAGE_ROUTES } from "@/shared/constants/routes";
 import { signupSchema, type SignupInput, type SignupResultDto } from "@/shared/schemas/auth";
@@ -36,9 +37,12 @@ export default function SignupPage() {
       }
     >
       {sentTo ? (
-        <Alert tone="success" title="Check your inbox">
-          We sent a confirmation link to {sentTo}. Open it on this device to finish signing up.
-        </Alert>
+        <div className={styles.stack}>
+          <Alert tone="success" title="Check your inbox">
+            We sent a confirmation link to {sentTo}. Open it to finish signing up. Nothing arrived, or the link expired?
+          </Alert>
+          <ResendConfirmation email={sentTo} />
+        </div>
       ) : (
         <div className={styles.stack}>
           <Form schema={signupSchema} onSubmit={submit} submitLabel="Create account">

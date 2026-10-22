@@ -1,7 +1,7 @@
 import "server-only";
-import type { RuleField, RuleOperator, TransactionKind } from "@/backend/constants/enums.constants";
+import type { Direction, RuleField, RuleOperator, TransactionKind } from "@/backend/constants/enums.constants";
 
-export type RuleTarget = { merchant: string | null; vpa: string | null; narration: string | null };
+export type RuleTarget = { merchant: string | null; vpa: string | null; narration: string | null; direction: Direction };
 
 export type Rule = {
   id: string;
@@ -10,6 +10,8 @@ export type Rule = {
   pattern: string;
   categoryId: string | null;
   transactionKind: TransactionKind | null;
+  /** Only money in or only money out; null = both. */
+  direction: Direction | null;
   priority: number;
 };
 
@@ -30,5 +32,9 @@ function matches(value: string | null, operator: RuleOperator, pattern: string):
 
 /** First matching rule by priority (lower number wins), or null. */
 export function firstMatchingRule(target: RuleTarget, rules: readonly Rule[]): Rule | null {
-  return [...rules].sort((a, b) => a.priority - b.priority).find((r) => matches(target[r.field], r.operator, r.pattern)) ?? null;
+  return (
+    [...rules]
+      .sort((a, b) => a.priority - b.priority)
+      .find((r) => (!r.direction || r.direction === target.direction) && matches(target[r.field], r.operator, r.pattern)) ?? null
+  );
 }

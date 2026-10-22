@@ -14,11 +14,15 @@ export const LLM = {
   /** Rough characters per token, used only to keep prompts inside MAX_INPUT_TOKENS. */
   CHARS_PER_TOKEN: 3,
   TIMEOUT_MS: 45_000,
+  /** A call isn't started inside a background job with less time than this left (it would be cut off). */
+  MIN_CALL_MS: 12_000,
+  /** Margin kept between a call's timeout and the job's deadline. */
+  DEADLINE_MARGIN_MS: 3_000,
   MAX_RETRIES: 1,
   TASKS: {
     categorize: { enabled: true, maxOutputTokens: 2_000, temperature: 0 },
     column_mapping: { enabled: true, maxOutputTokens: 1_000, temperature: 0 },
-    pdf_extraction: { enabled: true, maxOutputTokens: 4_000, temperature: 0 },
+    pdf_extraction: { enabled: true, maxOutputTokens: 8_000, temperature: 0 },
     monthly_summary: { enabled: true, maxOutputTokens: 800, temperature: 0.3 },
     refund_message: { enabled: true, maxOutputTokens: 600, temperature: 0.4 },
   } satisfies Record<LlmTask, { enabled: boolean; maxOutputTokens: number; temperature: number }>,
@@ -29,11 +33,14 @@ export const DEFAULT_OLLAMA_BASE_URL = "https://ollama.com/api";
 /** Below this confidence an LLM category is applied but the transaction is queued for review. */
 export const LLM_CONFIDENCE_THRESHOLD = 0.7;
 
-/** Unknown PDFs are read by the LLM in chunks; this many chunks per background job step (60 s limit). */
+/** PDFs are read by the LLM in chunks; one chunk per background job step keeps each step well inside 60 s. */
 export const PDF_LLM = {
-  CHUNKS_PER_STEP: 2,
-  /** Share of the input budget used by statement text (the rest is instructions and the response). */
-  TEXT_SHARE: 0.6,
+  CHUNKS_PER_STEP: 1,
+  /**
+   * Share of the input budget used by statement text. Kept small so the rows found in a chunk fit
+   * the response budget (a dense statement page produces roughly as many output tokens as input).
+   */
+  TEXT_SHARE: 0.35,
 } as const;
 
 /** CSV/Excel column mapping by the LLM. */

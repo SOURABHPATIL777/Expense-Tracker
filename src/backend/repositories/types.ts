@@ -158,6 +158,8 @@ export type RuleRow = Timestamps & {
   pattern: string;
   category_id: string | null;
   transaction_kind: TransactionKind | null;
+  direction: Direction | null;
+  origin: "user" | "auto";
   priority: number;
   is_active: boolean;
 };

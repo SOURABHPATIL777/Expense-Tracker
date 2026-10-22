@@ -34,6 +34,8 @@ const SUPABASE_STUBS = `
   grant all on storage.objects to authenticated, service_role;
   create function storage.foldername(name text) returns text[] language sql immutable as $$ select string_to_array(name, '/') $$;
   alter table storage.objects enable row level security;
+
+  create publication supabase_realtime;
 `;
 
 export type TestDb = Awaited<ReturnType<typeof createTestDb>>;

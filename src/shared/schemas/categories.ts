@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { RULE_FIELDS, RULE_OPERATORS, TRANSACTION_KINDS, type RuleField, type RuleOperator, type TransactionKind } from "../constants/enums";
+import { DIRECTIONS, RULE_FIELDS, RULE_OPERATORS, TRANSACTION_KINDS, type Direction, type RuleField, type RuleOperator, type TransactionKind } from "../constants/enums";
 import { nameSchema, uuidSchema } from "./common";
 import { checkboxField, optionalField } from "./formFields";
 
@@ -35,6 +35,8 @@ export const ruleBaseSchema = z.object({
   ...ruleFields,
   categoryId: uuidSchema.optional(),
   transactionKind: z.enum(TRANSACTION_KINDS).optional(),
+  /** Only money in or only money out; omitted = both. */
+  direction: z.enum(DIRECTIONS).optional(),
   priority: z.number().int().min(0).max(1000).default(100),
   isActive: z.boolean().default(true),
 });
@@ -46,6 +48,7 @@ export const ruleFormSchema = z
     ...ruleFields,
     categoryId: optionalField(uuidSchema),
     transactionKind: optionalField(z.enum(TRANSACTION_KINDS)),
+    direction: optionalField(z.enum(DIRECTIONS)),
     priority: z.coerce.number().int().min(0).max(1000).default(100),
     isActive: checkboxField,
   })
@@ -58,6 +61,9 @@ export type RuleDto = {
   pattern: string;
   categoryId: string | null;
   transactionKind: TransactionKind | null;
+  direction: Direction | null;
+  /** "auto" rules are created when you correct one transaction, so similar ones follow. */
+  origin: "user" | "auto";
   priority: number;
   isActive: boolean;
 };

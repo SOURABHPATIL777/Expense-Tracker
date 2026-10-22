@@ -19,7 +19,7 @@ import { Skeleton } from "@/frontend/components/Skeleton/Skeleton";
 import { DeleteImportDialog } from "@/frontend/components/DeleteImportDialog/DeleteImportDialog";
 import { useApi } from "@/frontend/hooks/useApi";
 import { usePaginatedList } from "@/frontend/hooks/usePaginatedList";
-import { usePolling } from "@/frontend/hooks/usePolling";
+import { useImportEvents } from "@/frontend/hooks/useImportEvents";
 import { api } from "@/frontend/lib/apiClient";
 import { formatDate } from "@/frontend/lib/format";
 import { API_ROUTES, PAGE_ROUTES } from "@/shared/constants/routes";
@@ -70,8 +70,16 @@ export default function ImportReviewPage() {
   const stalled = imp.data ? isStalledUpload(imp.data, now) : false;
   const inProgress = imp.data ? IN_PROGRESS.has(imp.data.status) && !stalled : true;
 
-  usePolling(imp.reload, inProgress);
-  usePolling(rows.reload, inProgress, 4000);
+  // Progress is pushed over the socket; the import and its rows reload when this import changes.
+  const reloadImp = imp.reload;
+  const reloadRows = rows.reload;
+  useImportEvents(
+    () => {
+      reloadImp();
+      reloadRows();
+    },
+    { importId: id, enabled: inProgress },
+  );
 
   if (imp.error) return <Alert tone="danger">{imp.error.message}</Alert>;
   if (!imp.data) return <Skeleton lines={6} />;

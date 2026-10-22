@@ -21,6 +21,17 @@ const eslintConfig = defineConfig([
     },
   },
   {
+    // The one exception: the browser's Realtime socket (live import progress). Data still flows
+    // through /api/v1; this file only listens for change notifications, authorised by RLS.
+    files: ["src/frontend/lib/realtime.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        { patterns: [{ group: ["@/backend/*", "**/backend/**"], message: "Frontend must call the API via apiClient, not import backend code." }] },
+      ],
+    },
+  },
+  {
     files: ["src/backend/**/*.ts"],
     rules: {
       "no-restricted-imports": [

@@ -4,7 +4,8 @@ import type { Db } from "@/backend/supabase/clients";
 import type { Logger } from "@/backend/logger/logger";
 import { AppError } from "@/backend/errors/AppError";
 import { JOBS, MATCHING } from "@/backend/constants/app.constants";
-import { PDF_LLM } from "@/backend/constants/llm.constants";
+import { LLM, PDF_LLM } from "@/backend/constants/llm.constants";
+import { timeLeftMs } from "@/backend/jobs/deadline";
 import type { ImportStatus, SourceApp, SourceKind } from "@/backend/constants/enums.constants";
 import { SOURCE_APP_LABELS } from "@/shared/constants/labels";
 import { ImportsRepository } from "@/backend/repositories/imports.repository";
@@ -139,6 +140,8 @@ export function importPipeline(db: Db, log: Logger) {
     const until = Math.min(chunks.length, cursor + maxChunks);
 
     for (; cursor < until; cursor++) {
+      // Not enough time left in this step for a whole chunk: continue in the next step.
+      if (timeLeftMs() < LLM.MIN_CALL_MS + LLM.DEADLINE_MARGIN_MS) break;
       const chunk = await readPdfChunkWithLlm(row.user_id, chunks[cursor], cursor === 0);
       if (!source && chunk.source) source = chunk.source;
       const app = source?.sourceApp ?? "other_bank";
@@ -431,5 +434,13 @@ export function importPipeline(db: Db, log: Logger) {
     return { done: true };
   }
 
-  return { extractStage, processStep };
+  /** Gives up on an import that is still in progress (its background job ran out of retries). */
+  async function markFailed(userId: string, importId: string, message: string): Promise<void> {
+    const row = await imports.findById(userId, importId);
+    if (row.status === "completed" || row.status === "failed") return;
+    await imports.update(userId, importId, { extracted_text: null });
+    await setStatus(row, "failed", message, "IMPORT_INTERRUPTED");
+  }
+
+  return { extractStage, processStep, markFailed };
 }

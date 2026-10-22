@@ -44,8 +44,14 @@ export function TransactionDetailModal({ id, categoryOptions, onClose, onChanged
 
   async function save(values: z.infer<typeof transactionEditFormSchema>) {
     if (!t) return;
-    await api.patch(API_ROUTES.transaction(t.id), values);
-    toast.show("Saved. Similar payments from this merchant will follow your choice.", "success");
+    const { data } = await api.patch<TransactionDetailDto>(API_ROUTES.transaction(t.id), values);
+    const more = data.alsoUpdated ?? 0;
+    toast.show(
+      more > 0
+        ? `Saved. Also updated ${more} similar transaction${more === 1 ? "" : "s"} with the same ${t.counterpartyVpa ? "UPI ID" : "name"}.`
+        : "Saved. Future transactions with the same UPI ID or name will follow your choice.",
+      "success",
+    );
     detail.reload();
     onChanged();
   }

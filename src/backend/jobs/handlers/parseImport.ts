@@ -32,4 +32,8 @@ export const parseImportJob = defineJob({
       await ctx.enqueue({ type, payload: { importId }, idempotencyKey: `${type}:import:${importId}` });
     }
   },
+  // Retries ran out (or runs kept being cut off): the import must not stay "processing" forever.
+  async onDead({ importId }, ctx) {
+    await importPipeline(ctx.db, ctx.log).markFailed(ctx.userId, importId, "We couldn't finish processing this file. Upload it again to retry.");
+  },
 });

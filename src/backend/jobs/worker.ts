@@ -5,7 +5,8 @@ import { RPC, TABLES } from "@/backend/constants/db.constants";
 import { JOBS } from "@/backend/constants/app.constants";
 import type { JobType } from "@/backend/constants/enums.constants";
 import { childLogger, logger, scrubText } from "@/backend/logger/logger";
-import { backoffSeconds } from "./defineJob";
+import { backoffSeconds, type JobContext } from "./defineJob";
+import { runWithDeadline } from "./deadline";
 import { enqueueJob } from "./queue";
 import { JOB_REGISTRY } from "./registry";
 
@@ -17,7 +18,11 @@ type ClaimedJob = { id: string; type: JobType; user_id: string; payload: unknown
  */
 export async function runWorker({ budgetMs = JOBS.WORKER_BUDGET_MS }: { budgetMs?: number } = {}): Promise<{ processed: number; failed: number }> {
   const db = getAdminClient();
-  const deadline = Date.now() + budgetMs;
+  const started = Date.now();
+  // A job started near the end of the budget may still run until the function's own limit, so
+  // no new job is claimed once there's too little of that left to do anything useful.
+  const hardStop = started + JOBS.INVOCATION_LIMIT_MS;
+  const deadline = Math.min(started + budgetMs, hardStop - JOBS.MIN_JOB_START_MS);
   let processed = 0;
   let failed = 0;
 
@@ -30,7 +35,7 @@ export async function runWorker({ budgetMs = JOBS.WORKER_BUDGET_MS }: { budgetMs
     const jobs = (data ?? []) as ClaimedJob[];
     if (jobs.length === 0) break;
     for (const job of jobs) {
-      const ok = await execute(db, job);
+      const ok = await execute(db, job, hardStop);
       processed += 1;
       if (!ok) failed += 1;
     }
@@ -38,37 +43,50 @@ export async function runWorker({ budgetMs = JOBS.WORKER_BUDGET_MS }: { budgetMs
   return { processed, failed };
 }
 
-async function execute(db: Db, job: ClaimedJob): Promise<boolean> {
+/** A job past its attempts was claimed again because its last run died with its process. */
+export const exceededAttempts = (attempts: number, maxAttempts: number) => attempts > maxAttempts;
+
+async function execute(db: Db, job: ClaimedJob, hardStop: number): Promise<boolean> {
   const log = childLogger({ jobId: job.id, jobType: job.type, userId: job.user_id, attempt: job.attempts });
   const definition = JOB_REGISTRY[job.type];
+  const ctx: JobContext = {
+    db,
+    log,
+    userId: job.user_id,
+    jobId: job.id,
+    attempt: job.attempts,
+    enqueue: (next) => enqueueJob(db, { ...next, userId: job.user_id }),
+  };
+  const payload = definition?.payload.safeParse(job.payload);
+
+  /** Gives up for good and lets the job clean up (e.g. mark its import failed). */
+  async function bury(message: string) {
+    await db.from(TABLES.JOBS).update({ status: "dead", last_error: message, locked_until: null, finished_at: new Date().toISOString() }).eq("id", job.id);
+    if (definition?.onDead && payload?.success) await definition.onDead(payload.data, ctx).catch((err) => log.error({ err }, "onDead failed"));
+  }
+
+  if (definition && exceededAttempts(job.attempts, definition.maxAttempts)) {
+    await bury("Stopped after repeated interrupted runs.");
+    log.error("job buried after interrupted runs");
+    return false;
+  }
   try {
-    if (!definition) throw new Error(`No handler registered for job type ${job.type}`);
-    const payload = definition.payload.parse(job.payload);
-    await definition.run(payload, {
-      db,
-      log,
-      userId: job.user_id,
-      jobId: job.id,
-      attempt: job.attempts,
-      enqueue: (next) => enqueueJob(db, { ...next, userId: job.user_id }),
-    });
+    if (!definition || !payload) throw new Error(`No handler registered for job type ${job.type}`);
+    if (!payload.success) throw payload.error;
+    await runWithDeadline(hardStop, () => definition.run(payload.data, ctx));
     await db.from(TABLES.JOBS).update({ status: "succeeded", finished_at: new Date().toISOString(), last_error: null }).eq("id", job.id);
     log.info("job succeeded");
     return true;
   } catch (err) {
     const message = scrubText(err instanceof Error ? err.message : String(err)).slice(0, 500);
-    const maxAttempts = definition?.maxAttempts ?? 1;
-    const dead = job.attempts >= maxAttempts;
-    await db
-      .from(TABLES.JOBS)
-      .update({
-        status: dead ? "dead" : "queued",
-        last_error: message,
-        locked_until: null,
-        run_after: new Date(Date.now() + backoffSeconds(job.attempts) * 1000).toISOString(),
-        finished_at: dead ? new Date().toISOString() : null,
-      })
-      .eq("id", job.id);
+    const dead = job.attempts >= (definition?.maxAttempts ?? 1);
+    if (dead) await bury(message);
+    else {
+      await db
+        .from(TABLES.JOBS)
+        .update({ status: "queued", last_error: message, locked_until: null, run_after: new Date(Date.now() + backoffSeconds(job.attempts) * 1000).toISOString() })
+        .eq("id", job.id);
+    }
     log.error({ err, dead }, "job failed");
     return false;
   }

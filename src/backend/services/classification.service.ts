@@ -2,7 +2,7 @@ import "server-only";
 import type { Db } from "@/backend/supabase/clients";
 import type { Logger } from "@/backend/logger/logger";
 import { unwrap } from "@/backend/errors/AppError";
-import { JOBS } from "@/backend/constants/app.constants";
+import { JOBS, SALARY_HINT } from "@/backend/constants/app.constants";
 import { LLM_CONFIDENCE_THRESHOLD } from "@/backend/constants/llm.constants";
 import type { TransactionKind } from "@/backend/constants/enums.constants";
 import { TABLES } from "@/backend/constants/db.constants";
@@ -14,6 +14,9 @@ import type { CategoryRow, RuleRow, TransactionRow } from "@/backend/repositorie
 import { firstMatchingRule, type Rule } from "@/backend/domain/rules";
 import { keywordAppearsIn, matchCategory, normalizeKeyword, resolveCategory } from "@/backend/domain/categoryMap";
 import { looksLikeIndividual } from "@/backend/domain/individual";
+import { looksLikeSalary, similarEarlierCredits } from "@/backend/domain/salary";
+import { counterpartyKey } from "@/backend/domain/counterparty";
+import { rememberCounterparty } from "./counterpartyRules.service";
 import { llmTaskEnabled, runLlmTask } from "@/backend/llm/run";
 import { CATEGORIZE_INSTRUCTIONS, categorizeData, categorizeSchema } from "@/backend/llm/prompts/categorize";
 
@@ -22,6 +25,8 @@ const DETERMINISTIC_KINDS = new Set<TransactionKind>(["self_transfer", "refund",
 
 /** Catalog name of the default category for person-to-person payments. */
 export const INDIVIDUAL_CATEGORY = "Individual";
+/** Catalog name of the salary category. */
+export const SALARY_CATEGORY = "Salary";
 
 export type ClassifyScope = { scope: "import"; importId: string; cursor?: string } | { scope: "all"; cursor?: string };
 
@@ -34,6 +39,7 @@ const toRule = (r: RuleRow): Rule => ({
   pattern: r.pattern,
   categoryId: r.category_id,
   transactionKind: r.transaction_kind,
+  direction: r.direction,
   priority: r.priority,
 });
 
@@ -95,14 +101,27 @@ export function classificationService(db: Db, log: Logger) {
     return { rows, cursor: ids.length === limit ? ids.at(-1)! : null };
   }
 
+  /** The user's recent credits from the payers in `rows`, for the "repeats monthly" salary hint. */
+  async function creditHistory(userId: string, rows: TransactionRow[]) {
+    const credits = rows.filter((t) => t.direction === "credit");
+    const vpas = [...new Set(credits.map((t) => t.counterparty_vpa).filter((v): v is string => Boolean(v)))];
+    const names = [...new Set(credits.filter((t) => !t.counterparty_vpa).map((t) => t.merchant_normalized).filter((v): v is string => Boolean(v)))];
+    if (!vpas.length && !names.length) return [];
+    const since = new Date(Date.now() - SALARY_HINT.LOOKBACK_DAYS * 86_400_000).toISOString();
+    const filters = [vpas.length && `counterparty_vpa.in.(${vpas.map((v) => JSON.stringify(v)).join(",")})`, names.length && `merchant_normalized.in.(${names.map((v) => JSON.stringify(v)).join(",")})`].filter(Boolean);
+    return transactions.listAll(userId, (q) => q.eq("direction", "credit").gte("occurred_at", since).or(filters.join(",")));
+  }
+
   async function llmPass(
     userId: string,
     pending: TransactionRow[],
     categories: CategoryRow[],
-    individual: CategoryRow | undefined,
+    special: { individual?: CategoryRow; salary?: CategoryRow },
     patches: Map<string, Patch>,
     reviewItems: NewReviewItem[],
+    salaryFound: TransactionRow[],
   ) {
+    const { individual, salary } = special;
     if (!llmTaskEnabled("categorize") || categories.length === 0) return;
     const names = categories.map((c) => c.name);
     const schema = categorizeSchema(names as [string, ...string[]]);
@@ -110,6 +129,7 @@ export function classificationService(db: Db, log: Logger) {
     const shared = new Map<string, { keyword: string; defaultCategoryId: string; transactionKind: TransactionKind | null }>();
     const own = new Map<string, { categoryId: string; transactionKind: TransactionKind | null }>();
 
+    const history = await creditHistory(userId, pending);
     for (let i = 0; i < pending.length; i += JOBS.LLM_BATCH_SIZE) {
       const batch = pending.slice(i, i + JOBS.LLM_BATCH_SIZE);
       const out = await runLlmTask({
@@ -126,15 +146,18 @@ export function classificationService(db: Db, log: Logger) {
             merchant: t.merchant_normalized ?? t.merchant_raw,
             upiHandle: t.counterparty_vpa,
             narration: t.narration,
+            dayOfMonth: new Date(t.occurred_at).getUTCDate(),
+            similarCreditsLast3Months: similarEarlierCredits(t, history),
           })),
         ),
       });
       for (const item of out.items) {
         const t = batch[item.index];
         if (!t) continue; // the model referenced an index we never sent
-        const category = item.isIndividual ? individual : item.category ? byName.get(item.category) : undefined;
+        const isSalary = item.isSalary && !item.isIndividual && t.direction === "credit";
+        const category = isSalary ? (salary ?? byName.get(item.category ?? "")) : item.isIndividual ? individual : item.category ? byName.get(item.category) : undefined;
         const lowConfidence = item.confidence < LLM_CONFIDENCE_THRESHOLD;
-        const explicitKind = item.kind === "unknown" || item.isIndividual ? null : item.kind;
+        const explicitKind = isSalary ? "income" : item.kind === "unknown" || item.isIndividual ? null : item.kind;
         patches.set(t.id, {
           category_id: category?.id ?? null,
           category_source: category ? "llm" : null,
@@ -146,9 +169,14 @@ export function classificationService(db: Db, log: Logger) {
           reviewItems.push({ kind: "low_confidence_category", transaction_id: t.id, payload: { suggestedCategoryId: category?.id ?? null, confidence: item.confidence } });
           continue;
         }
-        // Only a confident, business keyword that really appears in the text is shared with everyone.
+        if (isSalary) {
+          salaryFound.push(t);
+          continue;
+        }
+        // Only a confident, business keyword that really appears in the text is shared with everyone,
+        // and only from payments: who pays a user (an employer, a friend) says nothing about others.
         const keyword = normalizeKeyword(item.keyword);
-        if (item.isIndividual || !category || !keyword || !keywordAppearsIn(matchTexts(t), keyword)) continue;
+        if (t.direction !== "debit" || item.isIndividual || !category || !keyword || !keywordAppearsIn(matchTexts(t), keyword)) continue;
         if (category.default_category_id) shared.set(keyword, { keyword, defaultCategoryId: category.default_category_id, transactionKind: explicitKind });
         else own.set(keyword, { categoryId: category.id, transactionKind: explicitKind });
       }
@@ -162,26 +190,36 @@ export function classificationService(db: Db, log: Logger) {
     const { rows, cursor } = await nextBatch(userId, scope);
     if (rows.length === 0) return cursor;
 
-    const [categories, rules, entries, individualId] = await Promise.all([
+    const [categories, rules, entries, individualId, salaryId] = await Promise.all([
       categoriesRepo.listAll(userId),
       rulesRepo.listActive(userId),
       keywords.entriesFor(userId),
       keywords.catalogId(INDIVIDUAL_CATEGORY),
+      keywords.catalogId(SALARY_CATEGORY),
     ]);
     const categoryById = new Map(categories.map((c) => [c.id, c]));
     const individual = individualId ? categories.find((c) => c.default_category_id === individualId) : undefined;
+    const salary = salaryId ? categories.find((c) => c.default_category_id === salaryId) : undefined;
+    const salaryFound: TransactionRow[] = [];
     const domainRules = rules.map(toRule);
 
     const patches = new Map<string, Patch>();
     const pendingLlm: TransactionRow[] = [];
     for (const t of rows) {
-      const rule = firstMatchingRule({ merchant: t.merchant_normalized ?? t.merchant_raw, vpa: t.counterparty_vpa, narration: t.narration }, domainRules);
+      const rule = firstMatchingRule({ merchant: t.merchant_normalized ?? t.merchant_raw, vpa: t.counterparty_vpa, narration: t.narration, direction: t.direction }, domainRules);
       if (rule) {
         const categoryId = rule.categoryId ?? t.category_id;
         patches.set(t.id, { category_id: categoryId, category_source: "rule", category_confidence: 1, transaction_kind: kindFor(t, categoryById.get(categoryId ?? ""), rule.transactionKind) });
         continue;
       }
       if (DETERMINISTIC_KINDS.has(t.transaction_kind) || t.status !== "success") continue;
+
+      // Salary is recognised from the statement text before anything else (a payer is a business).
+      if (salary && looksLikeSalary(t)) {
+        patches.set(t.id, { category_id: salary.id, category_source: "system", category_confidence: 1, transaction_kind: "income" });
+        salaryFound.push(t);
+        continue;
+      }
 
       const mapped = matchCategory(matchTexts(t), entries);
       const mappedCategory = mapped ? resolveCategory(mapped, categories) : null;
@@ -207,12 +245,29 @@ export function classificationService(db: Db, log: Logger) {
     await savePatches(userId, patches);
     patches.clear();
     if (pendingLlm.length) {
-      await llmPass(userId, pendingLlm, categories, individual, patches, reviewItems);
+      await llmPass(userId, pendingLlm, categories, { individual, salary }, patches, reviewItems, salaryFound);
       await savePatches(userId, patches);
       await reviews.openMany(userId, reviewItems);
     }
+    await rememberSalarySources(userId, salaryFound, salary);
     log.info({ classified: rows.length, llm: pendingLlm.length, review: reviewItems.length }, "classification step");
     return cursor;
+  }
+
+  /**
+   * Keeps a reference to each employer found: an auto rule (money in from this payer → Salary,
+   * income), so next month's salary is recognised without the LLM even if the text changes.
+   */
+  async function rememberSalarySources(userId: string, found: TransactionRow[], salary: CategoryRow | undefined) {
+    if (!salary) return;
+    const seen = new Set<string>();
+    for (const t of found) {
+      const key = counterpartyKey(t);
+      if (!key || seen.has(`${key.field}:${key.value}`)) continue;
+      seen.add(`${key.field}:${key.value}`);
+      await rememberCounterparty(db, userId, t, { categoryId: salary.id, kind: "income" });
+    }
+    if (seen.size) log.info({ sources: seen.size }, "salary sources remembered");
   }
 
   async function savePatches(userId: string, patches: Map<string, Patch>) {

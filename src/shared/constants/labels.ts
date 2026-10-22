@@ -1,5 +1,6 @@
 import type {
   ClaimStatus,
+  Direction,
   ImportStatus,
   ParticipantResponse,
   RefundStatus,
@@ -108,6 +109,12 @@ export const RULE_FIELD_LABELS: Record<RuleField, string> = {
   merchant: "Merchant name",
   vpa: "UPI ID",
   narration: "Statement description",
+};
+
+/** For rules: which money a rule applies to. */
+export const RULE_DIRECTION_LABELS: Record<Direction, string> = {
+  debit: "Money out",
+  credit: "Money in",
 };
 
 export const RULE_OPERATOR_LABELS: Record<RuleOperator, string> = {

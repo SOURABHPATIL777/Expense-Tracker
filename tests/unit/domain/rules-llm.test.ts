@@ -11,12 +11,13 @@ const rule = (over: Partial<Rule>): Rule => ({
   pattern: "swiggy",
   categoryId: "food",
   transactionKind: null,
+  direction: null,
   priority: 100,
   ...over,
 });
 
 describe("firstMatchingRule", () => {
-  const target = { merchant: "Swiggy Instamart", vpa: "swiggy.stores@axisbank", narration: "UPI/SWIGGY" };
+  const target = { merchant: "Swiggy Instamart", vpa: "swiggy.stores@axisbank", narration: "UPI/SWIGGY", direction: "debit" as const };
 
   it("matches case-insensitively and respects priority", () => {
     const groceries = rule({ pattern: "instamart", categoryId: "groceries", priority: 10 });
@@ -33,15 +34,21 @@ describe("firstMatchingRule", () => {
   });
 
   it("treats patterns as literal text, not regex", () => {
-    expect(firstMatchingRule({ merchant: "a.b", vpa: null, narration: null }, [rule({ pattern: "." })])).not.toBeNull();
-    expect(firstMatchingRule({ merchant: "abc", vpa: null, narration: null }, [rule({ pattern: "a.c" })])).toBeNull();
+    expect(firstMatchingRule({ merchant: "a.b", vpa: null, narration: null, direction: "debit" }, [rule({ pattern: "." })])).not.toBeNull();
+    expect(firstMatchingRule({ merchant: "abc", vpa: null, narration: null, direction: "debit" }, [rule({ pattern: "a.c" })])).toBeNull();
+  });
+
+  it("applies a direction-limited rule only to that direction", () => {
+    const salary = rule({ field: "vpa", operator: "equals", pattern: "swiggy.stores@axisbank", direction: "credit", categoryId: "salary" });
+    expect(firstMatchingRule(target, [salary])).toBeNull();
+    expect(firstMatchingRule({ ...target, direction: "credit" }, [salary])?.categoryId).toBe("salary");
   });
 });
 
 describe("categorize prompt", () => {
   it("redacts account numbers, phones and emails before data reaches a model", () => {
     const data = categorizeData(["Food"], [
-      { index: 0, direction: "debit", amountRupees: 350, merchant: "Swiggy", upiHandle: "9876543210@ybl", narration: "UPI/427912345678/acct XX1234 me@mail.com" },
+      { index: 0, direction: "debit", amountRupees: 350, merchant: "Swiggy", upiHandle: "9876543210@ybl", narration: "UPI/427912345678/acct XX1234 me@mail.com", dayOfMonth: 5, similarCreditsLast3Months: 0 },
     ]);
     expect(data).not.toMatch(/9876543210|427912345678|XX1234|me@mail\.com/);
     expect(data).toContain("Swiggy");
@@ -85,7 +92,7 @@ describe("Ollama configuration", () => {
 
 describe("rule form", () => {
   it("needs a category or a type", () => {
-    const base = { field: "merchant", operator: "contains", pattern: "rent", categoryId: "", transactionKind: "", priority: "100", isActive: "true" };
+    const base = { field: "merchant", operator: "contains", pattern: "rent", categoryId: "", transactionKind: "", direction: "", priority: "100", isActive: "true" };
     expect(ruleFormSchema.safeParse(base).success).toBe(false);
     expect(ruleFormSchema.safeParse({ ...base, transactionKind: "self_transfer" }).success).toBe(true);
   });

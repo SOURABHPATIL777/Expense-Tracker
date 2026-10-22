@@ -61,7 +61,13 @@ export type TransactionDto = TransactionSummaryDto & {
 
 export type TransactionSourceDto = { importId: string; fileName: string | null; sourceKind: SourceKind; sourceApp: string; addedAt: string };
 
-export type TransactionDetailDto = TransactionDto & { sources: TransactionSourceDto[]; openRefundId: string | null; splitId: string | null };
+export type TransactionDetailDto = TransactionDto & {
+  sources: TransactionSourceDto[];
+  openRefundId: string | null;
+  splitId: string | null;
+  /** After an edit: how many similar transactions (same UPI ID / account and direction) were updated too. */
+  alsoUpdated?: number;
+};
 
 /** Edit form: empty category = uncategorised, empty note = no note. */
 export const transactionEditFormSchema = z.object({

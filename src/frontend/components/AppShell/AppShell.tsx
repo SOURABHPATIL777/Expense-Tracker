@@ -10,6 +10,8 @@ import { useApi } from "@/frontend/hooks/useApi";
 import { Icon } from "@/frontend/components/Icon/Icon";
 import { Modal } from "@/frontend/components/Modal/Modal";
 import { Skeleton } from "@/frontend/components/Skeleton/Skeleton";
+import { ProcessingPill } from "@/frontend/components/ProcessingPill/ProcessingPill";
+import { useActiveImports } from "@/frontend/hooks/useActiveImports";
 import { API_ROUTES, PAGE_ROUTES } from "@/shared/constants/routes";
 import type { MeDto } from "@/shared/schemas/auth";
 import styles from "./AppShell.module.css";
@@ -106,6 +108,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const [moreOpen, setMoreOpen] = useState(false);
   const { data: me } = useApi<MeDto>(API_ROUTES.auth.me);
+  const activeImports = useActiveImports();
 
   async function logout() {
     await api.post(API_ROUTES.auth.logout).catch(() => undefined);
@@ -131,12 +134,14 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className={styles.shell}>
       <aside className={styles.sidebar}>
         <Brand className={styles.sidebarBrand} />
+        <ProcessingPill imports={activeImports} />
         <WithPath render={(path) => <SideNav path={path} />} />
         {account}
       </aside>
 
       <header className={styles.topbar}>
         <Brand />
+        <ProcessingPill imports={activeImports} className={styles.topPill} />
         <button type="button" className={styles.avatarButton} onClick={() => setMoreOpen(true)} aria-label="Account and more">
           {initials(me)}
         </button>

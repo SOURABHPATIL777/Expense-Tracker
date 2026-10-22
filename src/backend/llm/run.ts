@@ -6,6 +6,7 @@ import { scrubText } from "@/backend/logger/logger";
 import type { LlmTask } from "@/backend/constants/enums.constants";
 import { LLM } from "@/backend/constants/llm.constants";
 import { recordAgentRun } from "@/backend/repositories/llm.repository";
+import { timeLeftMs } from "@/backend/jobs/deadline";
 import { getModel, llmAvailable } from "./registry";
 
 /** Instructions shared by every task: statement text is data, not instructions. */
@@ -29,6 +30,16 @@ export function jsonContract(schema: ZodType): string {
 
 export const truncateForBudget = (text: string, maxChars: number) => (text.length <= maxChars ? text : text.slice(0, maxChars));
 
+/**
+ * The call's timeout: the configured one, shortened so a call made by a background job ends
+ * before the job's deadline. Too little time left means the job should continue in a later step.
+ */
+export function callTimeoutMs(left = timeLeftMs()): number {
+  const timeout = Math.min(LLM.TIMEOUT_MS, left - LLM.DEADLINE_MARGIN_MS);
+  if (timeout < LLM.MIN_CALL_MS) throw new AppError("LLM_UNAVAILABLE", { message: "Not enough time left in this step; it will continue shortly." });
+  return timeout;
+}
+
 export function llmTaskEnabled(task: LlmTask): boolean {
   return LLM.TASKS[task].enabled && llmAvailable();
 }
@@ -48,6 +59,7 @@ type RunOptions<S extends ZodType> = {
  */
 export async function runLlmTask<S extends ZodType>(opts: RunOptions<S>): Promise<z.infer<S>> {
   if (!llmTaskEnabled(opts.task)) throw new AppError("LLM_DISABLED");
+  const timeoutMs = callTimeoutMs();
   const settings = LLM.TASKS[opts.task];
   const started = performance.now();
   const base = { userId: opts.userId, task: opts.task, provider: "ollama" as const, model: LLM.MODEL };
@@ -60,7 +72,7 @@ export async function runLlmTask<S extends ZodType>(opts: RunOptions<S>): Promis
       temperature: settings.temperature,
       maxOutputTokens: settings.maxOutputTokens,
       maxRetries: LLM.MAX_RETRIES,
-      abortSignal: AbortSignal.timeout(LLM.TIMEOUT_MS),
+      abortSignal: AbortSignal.timeout(timeoutMs),
       providerOptions: { ollama: { options: { num_ctx: LLM.MAX_INPUT_TOKENS } } },
     });
     await recordAgentRun({

@@ -6,7 +6,7 @@
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(10rem, 100%), 1fr));
   gap: var(--space-3);
 }
 
@@ -21,13 +21,14 @@
 
 .row {
   display: grid;
-  grid-template-columns: 1fr auto 6.5rem 2rem;
+  grid-template-columns: minmax(0, 1fr) auto minmax(5rem, 6.5rem) 2rem;
   align-items: center;
   gap: var(--space-2);
 }
 
 .value {
-  width: 6rem;
+  width: 100%;
+  max-width: 6rem;
 }
 
 .share {

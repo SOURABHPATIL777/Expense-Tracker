@@ -20,6 +20,8 @@ export type JobDefinition<S extends ZodType = ZodType> = {
   payload: S;
   maxAttempts: number;
   run: (payload: z.infer<S>, ctx: JobContext) => Promise<void>;
+  /** Called once when the job gives up for good, so whatever it was working on isn't left "in progress". */
+  onDead?: (payload: z.infer<S>, ctx: JobContext) => Promise<void>;
 };
 
 /** Every background job is declared through this so retries, validation and logging are uniform. */
@@ -28,6 +30,7 @@ export function defineJob<S extends ZodType>(def: {
   payload: S;
   maxAttempts?: number;
   run: (payload: z.infer<S>, ctx: JobContext) => Promise<void>;
+  onDead?: (payload: z.infer<S>, ctx: JobContext) => Promise<void>;
 }): JobDefinition<S> {
   return { maxAttempts: JOBS.DEFAULT_MAX_ATTEMPTS, ...def };
 }

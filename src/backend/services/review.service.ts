@@ -7,6 +7,7 @@ import { TransactionsRepository } from "@/backend/repositories/transactions.repo
 import { toReviewItemDto } from "@/backend/mappers/transactions.mapper";
 import { pageMeta } from "./paginate";
 import { recategorize } from "./categorization.service";
+import { spreadManualEdit } from "./counterpartyRules.service";
 import type { PaginationQuery } from "@/shared/schemas/common";
 import type { ResolveReviewInput } from "@/shared/schemas/review";
 import type { ReviewItemKind } from "@/backend/constants/enums.constants";
@@ -55,6 +56,7 @@ export function reviewService(db: Db) {
       }
       if (input.action === "recategorize" && item.transaction_id) {
         await recategorize(db, userId, item.transaction_id, input.categoryId);
+        await spreadManualEdit(db, userId, item.transaction_id, { categoryId: input.categoryId });
       }
       await items.update(userId, id, {
         status: input.action === "dismiss" ? "dismissed" : "resolved",
