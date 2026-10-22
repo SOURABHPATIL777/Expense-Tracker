@@ -13,7 +13,10 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["tests/unit/**/*.test.ts"],
+    include: ["tests/unit/**/*.test.ts", "tests/db/**/*.test.ts"],
+    // PGlite boots a WASM Postgres per DB test file.
+    testTimeout: 30_000,
+    hookTimeout: 60_000,
     setupFiles: ["tests/setup.ts"],
   },
 });

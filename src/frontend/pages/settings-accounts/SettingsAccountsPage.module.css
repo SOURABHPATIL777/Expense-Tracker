@@ -1,0 +1,16 @@
+.name {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.muted {
+  color: var(--color-text-subtle);
+  font-size: var(--text-xs);
+}
+
+.vpas {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
