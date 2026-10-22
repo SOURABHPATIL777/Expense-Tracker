@@ -19,7 +19,7 @@ import { detectFormat, readerFor, readFile } from "@/backend/import/readers";
 import { detectConfig, extract, findHeaderRow } from "@/backend/import/engine";
 import { istDate } from "@/backend/import/dates";
 import { headerSignature, textLayoutFingerprint } from "@/backend/import/text";
-import type { ExtractResult, ImportConfig, ParsedEvent, ReaderId, ReadResult } from "@/backend/import/types";
+import type { ExtractResult, ImportConfig, ParsedEvent, ReaderId, TableRead } from "@/backend/import/types";
 import { fingerprintAll, sha256Hex } from "@/backend/domain/fingerprint";
 import { matchIncoming, type MatchCandidate } from "@/backend/domain/matcher";
 import { inferKind, paymentRail } from "@/backend/domain/inferKind";
@@ -66,10 +66,10 @@ export function importPipeline(db: Db, log: Logger) {
     return { buffer, reader: readerFor(detectFormat(row.file_name, buffer)) };
   }
 
-  /** The stored layout that recognises this file, if any. */
-  async function matchLayout(read: ReadResult, reader: ReaderId): Promise<{ layout: ImportLayoutRow; config: ImportConfig } | null> {
+  /** The stored (previously learned) layout that recognises this table, if any. */
+  async function matchLayout(read: TableRead): Promise<{ layout: ImportLayoutRow; config: ImportConfig } | null> {
     const parsers = await layouts.parsers();
-    const config = detectConfig(read, reader, parsers.map((p) => p.config));
+    const config = detectConfig(read, parsers.map((p) => p.config));
     return parsers.find((p) => p.config === config) ?? null;
   }
 
@@ -218,8 +218,8 @@ export function importPipeline(db: Db, log: Logger) {
       const { buffer, reader } = await loadFile(row);
       const read = await readFile(reader, buffer, opts.password);
 
-      const match = await matchLayout(read, reader);
-      if (match) {
+      const match = read.kind === "table" ? await matchLayout(read) : null;
+      if (match && read.kind === "table") {
         const result = extract(read, match.config);
         if (result.rows.some((r) => r.parsed)) {
           await layouts.touch(match.layout);
@@ -237,7 +237,7 @@ export function importPipeline(db: Db, log: Logger) {
 
       if (read.kind === "table") {
         const mapped = await mapColumnsWithLlm(userId, row.file_name, read);
-        const headerIdx = findHeaderRow(read.rows, mapped.config.table!);
+        const headerIdx = findHeaderRow(read.rows, mapped.config.table);
         const learned = await layouts.save({
           kind: "table",
           signature: headerSignature(read.rows[headerIdx] ?? []),
@@ -256,7 +256,8 @@ export function importPipeline(db: Db, log: Logger) {
         });
       }
 
-      // Unknown PDF layout: keep its text for the duration of the AI read, then go chunk by chunk.
+      // PDFs are always read by the LLM: keep the text for the duration of the read, chunk by chunk.
+      // A layout seen before tells us the source up front.
       const known = await layouts.find("llm_extract", textLayoutFingerprint(read.lines));
       await rawEvents.replaceForImport(userId, importId, []);
       row = await imports.update(userId, importId, {

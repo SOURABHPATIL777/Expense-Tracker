@@ -5,31 +5,44 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const runLlmTask = vi.fn();
 vi.mock("@/backend/llm/run", async (original) => ({ ...(await original<typeof import("@/backend/llm/run")>()), runLlmTask }));
 
-const { matchCategory, normalizeKeyword, keywordAppearsIn } = await import("@/backend/domain/categoryMap");
+const { matchCategory, normalizeKeyword, keywordAppearsIn, resolveCategory } = await import("@/backend/domain/categoryMap");
 const { looksLikeIndividual } = await import("@/backend/domain/individual");
-const { verifyLlmRows, chunkLines } = await import("@/backend/llm/pdfExtraction");
+const { verifyLlmRows, chunkLines, readPdfChunkWithLlm } = await import("@/backend/llm/pdfExtraction");
 const { mapColumnsWithLlm } = await import("@/backend/llm/columnMapping");
 const { readCsv } = await import("@/backend/import/readers/csv");
 
-const entry = (keyword: string, categoryName: string, userScoped = false) => ({ keyword, categoryName, transactionKind: null, userScoped });
+/** Shared rows point at a catalog id; a user's own rows point at their category id. */
+const shared = (keyword: string, defaultCategoryId: string) => ({ keyword, categoryId: null, defaultCategoryId, transactionKind: null, userScoped: false });
+const own = (keyword: string, categoryId: string) => ({ keyword, categoryId, defaultCategoryId: null, transactionKind: null, userScoped: true });
 
-describe("category map matching", () => {
-  const shared = [entry("indmoney", "Investments"), entry("indmoney credit card repayment", "Credit Card Bill"), entry("ola", "Transport"), entry("zomato", "Food & Dining")];
+describe("category keyword matching", () => {
+  const entries = [shared("indmoney", "cat-investments"), shared("indmoney credit card repayment", "cat-cc-bill"), shared("ola", "cat-transport"), shared("zomato", "cat-food")];
 
   it("prefers the longest shared keyword", () => {
-    expect(matchCategory(["INDMONEY CREDIT CARD REPAYMENT"], shared)?.categoryName).toBe("Credit Card Bill");
-    expect(matchCategory(["Indmoney"], shared)?.categoryName).toBe("Investments");
+    expect(matchCategory(["INDMONEY CREDIT CARD REPAYMENT"], entries)?.defaultCategoryId).toBe("cat-cc-bill");
+    expect(matchCategory(["Indmoney"], entries)?.defaultCategoryId).toBe("cat-investments");
   });
 
   it("lets the user's own mapping win over a longer shared one", () => {
-    const own = entry("indmoney", "Shopping", true);
-    expect(matchCategory(["INDMONEY CREDIT CARD REPAYMENT"], [...shared, own])?.categoryName).toBe("Shopping");
+    expect(matchCategory(["INDMONEY CREDIT CARD REPAYMENT"], [...entries, own("indmoney", "my-shopping")])?.categoryId).toBe("my-shopping");
   });
 
   it("matches whole words only, across merchant, narration and UPI handle", () => {
-    expect(matchCategory(["Coca Cola"], shared)).toBeNull();
-    expect(matchCategory([null, "UPI/412345678901/ZOMATO.ORDER@HDFCBANK"], shared)?.categoryName).toBe("Food & Dining");
+    expect(matchCategory(["Coca Cola"], entries)).toBeNull();
+    expect(matchCategory([null, "UPI/412345678901/ZOMATO.ORDER@HDFCBANK"], entries)?.defaultCategoryId).toBe("cat-food");
     expect(keywordAppearsIn(["Apple Media Services"], "apple media")).toBe(true);
+  });
+
+  it("resolves to the user's own category, or their copy of the catalog one", () => {
+    const categories = [
+      { id: "my-food", default_category_id: "cat-food" },
+      { id: "my-shopping", default_category_id: null },
+    ];
+    expect(resolveCategory(shared("zomato", "cat-food"), categories)?.id).toBe("my-food");
+    expect(resolveCategory(own("indmoney", "my-shopping"), categories)?.id).toBe("my-shopping");
+    // The user deleted their copy of the catalog category: no match, so the next step decides.
+    expect(resolveCategory(shared("ola", "cat-transport"), categories)).toBeNull();
+    expect(resolveCategory(own("x", "deleted"), categories)).toBeNull();
   });
 
   it("normalises keywords for storage and rejects junk", () => {
@@ -76,6 +89,26 @@ describe("verifyLlmRows (PDF anti-hallucination)", () => {
     expect(events[0].referenceId).toBeNull();
   });
 
+  it("reads a PDF chunk end to end, keeping real rows and dropping invented ones", async () => {
+    const lines = readFileSync(join(process.cwd(), "tests/fixtures/synthetic/phonepe.lines.txt"), "utf8").split("\n").filter(Boolean);
+    runLlmTask.mockReset().mockResolvedValueOnce({
+      source: { sourceKind: "upi_app", sourceApp: "phonepe" },
+      rows: [
+        { date: "Oct 05, 2024", time: "10:32 am", description: "Paid to Swiggy", counterparty: "Swiggy", amount: "₹350", direction: "debit", reference: "427912345678" },
+        { date: "Oct 06, 2024", time: "08:05 pm", description: "Received from Rahul Sharma", counterparty: "Rahul Sharma", amount: "₹500", direction: "credit", reference: "427998765432" },
+        { date: "Oct 07, 2024", description: "Paid to Amazon", amount: "₹999", direction: "debit" },
+      ],
+    });
+    const out = await readPdfChunkWithLlm("user-1", lines, true);
+    expect(out.source).toEqual({ sourceKind: "upi_app", sourceApp: "phonepe" });
+    expect(out.dropped).toBe(1);
+    expect(out.events.map((e) => [e.direction, e.amountMinor, e.referenceId])).toEqual([
+      ["debit", 35000, "427912345678"],
+      ["credit", 50000, "427998765432"],
+    ]);
+    expect(out.events[0].occurredAt).toBe("2024-10-05T05:02:00.000Z");
+  });
+
   it("chunks long text by size", () => {
     const lines = Array.from({ length: 100 }, (_, i) => `line ${i} ${"x".repeat(40)}`);
     const chunks = chunkLines(lines, 1_000);
@@ -111,6 +144,22 @@ describe("mapColumnsWithLlm", () => {
     await mapColumnsWithLlm("user-1", "statement.csv", read);
     expect(runLlmTask).toHaveBeenCalledTimes(2);
     expect(runLlmTask.mock.calls[1][0].data).toContain("problemsWithPreviousAnswer");
+  });
+
+  it("rejects a mapping that parses but puts the amount in the reference column", async () => {
+    const amountAsReference = { ...good, columns: { ...good.columns, reference: 4 } };
+    runLlmTask.mockResolvedValueOnce(amountAsReference).mockResolvedValueOnce(good);
+    const out = await mapColumnsWithLlm("user-1", "statement.csv", read);
+    expect(runLlmTask).toHaveBeenCalledTimes(2);
+    expect(runLlmTask.mock.calls[1][0].data).toMatch(/column 4 was used for reference and debit/);
+    expect(out.config.table.columns.reference).toEqual(["chq ref no"]);
+  });
+
+  it("rejects a reference column that holds money even when no column is reused", async () => {
+    const balanceAsReference = { ...good, columns: { date: 0, narration: 1, reference: 6 } };
+    runLlmTask.mockResolvedValue(balanceAsReference);
+    await expect(mapColumnsWithLlm("user-1", "statement.csv", read)).rejects.toThrow(/couldn't work out/);
+    expect(runLlmTask.mock.calls[1][0].data).toMatch(/reference column holds amounts/);
   });
 
   it("gives up after two mappings that don't parse", async () => {

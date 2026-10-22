@@ -15,12 +15,12 @@ export type ReadResult = TableRead | TextRead;
 
 export type ReaderId = "csv" | "xlsx" | "pdf_text";
 
-/** Tabular presets match CSV and Excel alike; text presets read PDFs. */
-export type ConfigReader = "table" | "pdf_text";
+/** Table layouts read CSV and Excel alike; PDFs are read by the LLM (llm/pdfExtraction.ts). */
+export type ConfigReader = "table";
 
 // ---------------------------------------------------------------------------
-// Import configuration: presets and user templates share this declarative shape.
-// A new bank or UPI app is a new config object, never new parsing code.
+// Import configuration: a declarative table layout, stored in import_layouts once the LLM has
+// worked it out. A new bank or UPI app is a new config object, never new parsing code.
 // ---------------------------------------------------------------------------
 
 export type AmountSpec =
@@ -55,41 +55,6 @@ export type TableSpec = {
   dateFormats: string[];
 };
 
-/** Regex-driven extraction for text sources. Patterns use named groups. */
-export type TextSpec = {
-  /** All must match for the preset to be detected. */
-  detect: string[];
-  /** Only search the first N lines (statement header) — narrations mention other banks' names. */
-  detectWithinLines?: number;
-  /** Splits the line stream into records; each match starts a new record. */
-  recordStart: string;
-  /** Lines matching any of these are dropped before record splitting (page headers/footers). */
-  ignoreLines?: string[];
-  fields: {
-    /** Must capture `date` (and optionally `time`). */
-    date: string;
-    /** Must capture `amount`; may also capture the running `balance`. */
-    amount: string;
-    /** Keyword fallbacks for direction (used when the balance can't decide it). */
-    debitWhen: string;
-    creditWhen: string;
-    /** Captures `narration`; defaults to the record's first line. */
-    narration?: string;
-    counterparty?: string;
-    vpa?: string;
-    reference?: string;
-    appTransactionId?: string;
-    time?: string;
-  };
-  status?: Array<{ when: string; status: TransactionStatus }>;
-  dateFormats: string[];
-  /**
-   * Bank PDFs render debit/credit as unlabeled columns; with a captured running balance the
-   * direction is the sign of the balance change from the previous row.
-   */
-  directionFromBalance?: boolean;
-};
-
 export type ImportConfig = {
   id: string;
   label: string;
@@ -98,8 +63,7 @@ export type ImportConfig = {
   reader: ConfigReader;
   /** True only once a real, anonymised export has passed the fixture tests. */
   verified: boolean;
-  table?: TableSpec;
-  text?: TextSpec;
+  table: TableSpec;
 };
 
 // ---------------------------------------------------------------------------

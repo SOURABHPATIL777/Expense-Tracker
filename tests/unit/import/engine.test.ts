@@ -1,28 +1,48 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { detectConfig, extract } from "@/backend/import/engine";
+import { detectConfig, extract, findHeaderRow } from "@/backend/import/engine";
+import type { z } from "zod";
+import { configFromMapping, mappingSchema } from "@/backend/import/mapping";
 import { readCsv } from "@/backend/import/readers/csv";
-import type { ImportConfig, TextRead } from "@/backend/import/types";
-
-/** Stored layouts as seeded into import_layouts by the auto-import migration. */
-const LAYOUTS: ImportConfig[] = (
-  JSON.parse(readFileSync(join(process.cwd(), "tests/fixtures/layouts.seed.json"), "utf8")) as Array<{ config: ImportConfig }>
-).map((l) => l.config);
+import type { TableRead } from "@/backend/import/types";
 
 const fixture = (name: string) => readFileSync(join(process.cwd(), "tests/fixtures/synthetic", name));
-const lines = (name: string): TextRead => ({ kind: "text", lines: fixture(name).toString("utf8").split("\n").filter(Boolean) });
 
-describe("HDFC CSV (table preset)", () => {
-  const read = readCsv(fixture("hdfc.csv"));
-  const config = detectConfig(read, "csv", LAYOUTS, "hdfc");
+/** Builds the layout the LLM would learn for a file (what ends up in import_layouts). */
+function learnedLayout(
+  read: TableRead,
+  headerText: string,
+  mapping: Omit<z.input<typeof mappingSchema>, "headerRowIndex">,
+  source: Parameters<typeof configFromMapping>[2],
+) {
+  const headerRowIndex = read.rows.findIndex((r) => r[0] === headerText);
+  return configFromMapping(mappingSchema.parse({ ...mapping, headerRowIndex }), read.rows[headerRowIndex], source);
+}
 
-  it("detects the HDFC preset past the statement preamble", () => {
-    expect(config?.id).toBe("bank.hdfc.table.v1");
+const hdfcRead = readCsv(fixture("hdfc.csv"));
+const hdfc = learnedLayout(
+  hdfcRead,
+  "Date",
+  { columns: { date: 0, narration: 1, balance: 6 }, amount: { mode: "split", debit: 4, credit: 5 }, dateFormat: "dd/MM/yy" },
+  { sourceKind: "bank", sourceApp: "hdfc", label: "HDFC Bank statement (CSV/Excel)" },
+);
+
+const paytmRead = readCsv(fixture("paytm.csv"));
+const paytm = learnedLayout(
+  paytmRead,
+  "Date",
+  { columns: { date: 0, time: 1, narration: 2, vpa: 3, reference: 6, appTransactionId: 7, note: 10 }, amount: { mode: "signed", amount: 5 }, dateFormat: "dd/MM/yyyy" },
+  { sourceKind: "upi_app", sourceApp: "paytm", label: "Paytm statement (CSV/Excel)" },
+);
+
+describe("HDFC CSV (split debit/credit columns)", () => {
+  it("finds the header past the statement preamble", () => {
+    expect(findHeaderRow(hdfcRead.rows, hdfc.table)).toBeGreaterThan(0);
   });
 
   it("extracts debits and credits, skipping footer rows", () => {
-    const { rows, periodStart, periodEnd } = extract(read, config!);
+    const { rows, periodStart, periodEnd } = extract(hdfcRead, hdfc);
     expect(rows.map((r) => r.parsed?.direction)).toEqual(["debit", "credit", "credit"]);
     expect(rows.map((r) => r.parsed?.amountMinor)).toEqual([35000, 50000, 8500000]);
     expect(periodStart).toBe("2024-10-05");
@@ -30,7 +50,7 @@ describe("HDFC CSV (table preset)", () => {
   });
 
   it("pulls UTR, VPA and payee from the UPI narration", () => {
-    const first = extract(read, config!).rows[0].parsed!;
+    const first = extract(hdfcRead, hdfc).rows[0].parsed!;
     expect(first.referenceId).toBe("427912345678");
     expect(first.counterpartyVpa).toBe("swiggy.stores@axisbank");
     expect(first.counterpartyName).toBe("SWIGGY");
@@ -40,71 +60,27 @@ describe("HDFC CSV (table preset)", () => {
 });
 
 describe("Paytm CSV (signed amounts, separate time column)", () => {
-  const read = readCsv(fixture("paytm.csv"));
-  const config = detectConfig(read, "csv", LAYOUTS);
-
-  it("detects Paytm without a hint", () => {
-    expect(config?.id).toBe("upi.paytm.table.v1");
-  });
-
   it("uses the sign for direction and combines date + time", () => {
-    const [paid, received] = extract(read, config!).rows.map((r) => r.parsed!);
+    const [paid, received] = extract(paytmRead, paytm).rows.map((r) => r.parsed!);
     expect(paid).toMatchObject({ direction: "debit", amountMinor: 35000, referenceId: "427912345678", counterpartyVpa: "swiggy@paytm" });
     expect(paid.occurredAt).toBe("2024-10-05T05:02:11.000Z");
     expect(received).toMatchObject({ direction: "credit", amountMinor: 50000, note: "dinner" });
   });
 });
 
-describe("PhonePe PDF (text preset)", () => {
-  const read = lines("phonepe.lines.txt");
-  const config = detectConfig(read, "pdf_text", LAYOUTS, "phonepe");
-
-  it("detects PhonePe", () => {
-    expect(config?.id).toBe("upi.phonepe.pdf.v1");
+describe("detectConfig (stored layouts)", () => {
+  it("recognises a file by a layout learned earlier", () => {
+    expect(detectConfig(hdfcRead, [paytm, hdfc])?.sourceApp).toBe("hdfc");
+    expect(detectConfig(paytmRead, [hdfc, paytm])?.sourceApp).toBe("paytm");
   });
 
-  it("splits records at date lines and reads every field", () => {
-    const rows = extract(read, config!).rows;
-    expect(rows).toHaveLength(2);
-    expect(rows[0].parsed).toMatchObject({
-      direction: "debit",
-      amountMinor: 35000,
-      counterpartyName: "Swiggy",
-      referenceId: "427912345678",
-      appTransactionId: "T2410051032123456789",
-      occurredAt: "2024-10-05T05:02:00.000Z",
-    });
-    expect(rows[1].parsed).toMatchObject({ direction: "credit", amountMinor: 50000, counterpartyName: "Rahul Sharma" });
-  });
-});
-
-describe("Bank PDF (balance-delta direction)", () => {
-  const read = lines("sbi.pdf.lines.txt");
-  const config = detectConfig(read, "pdf_text", LAYOUTS, "sbi");
-
-  it("detects SBI's PDF preset over the generic fallback", () => {
-    expect(config?.id).toBe("bank.sbi.pdf.v1");
+  it("prefers the most specific header", () => {
+    const loose = { ...hdfc, sourceApp: "other_bank" as const, table: { ...hdfc.table, headerMatch: hdfc.table.headerMatch.slice(0, 2) } };
+    expect(detectConfig(hdfcRead, [loose, hdfc])?.sourceApp).toBe("hdfc");
   });
 
-  it("derives direction from balance changes, with keywords for the first row", () => {
-    const rows = extract(read, config!).rows.map((r) => r.parsed!);
-    expect(rows.map((r) => [r.direction, r.amountMinor])).toEqual([
-      ["debit", 35000],
-      ["credit", 50000],
-      ["debit", 200000],
-    ]);
-    expect(rows[1].referenceId).toBe("427998765432");
-  });
-
-  it("matches no stored layout for an unknown bank's PDF (it goes to the AI reader)", () => {
-    const unknown: TextRead = { kind: "text", lines: read.lines.filter((l) => !/State Bank/i.test(l)) };
-    expect(detectConfig(unknown, "pdf_text", LAYOUTS)).toBeNull();
-  });
-});
-
-describe("layout seed", () => {
-  it("is exactly what the migration inserts into import_layouts", () => {
-    const sql = readFileSync(join(process.cwd(), "supabase/migrations/20261023000001_auto_import.sql"), "utf8");
-    for (const l of LAYOUTS) expect(sql, l.id).toContain(`'${l.id}'`);
+  it("matches nothing when no layout has been learned yet (the LLM works it out)", () => {
+    expect(detectConfig(hdfcRead, [])).toBeNull();
+    expect(detectConfig(hdfcRead, [paytm])).toBeNull();
   });
 });

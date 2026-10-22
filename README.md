@@ -36,7 +36,7 @@ scripts/               rls-check.ts (live RLS smoke test), mkroute.sh (route gen
 
 - **Layer rules are enforced by ESLint.** The frontend never imports backend code or Supabase; it calls `/api/v1/*` through `apiClient`. Backend files import `server-only`.
 - **jscpd** fails lint on duplicated code.
-- **Statement layouts** live in the `import_layouts` table (seeded from `tests/fixtures/layouts.seed.json`); new ones are learned automatically. **Category keywords** live in `category_map`.
+- **Statement layouts** live in the `import_layouts` table. Nothing is seeded: the AI works out each new layout the first time it is seen and saves it for everyone. **Categories** come from the `default_categories` catalog; **category keywords** live in `category_map_keyword` (see [Categories and keywords](#categories-and-keywords)).
 - **Accepted formats and export instructions** per source live in `src/shared/constants/sources.ts`.
 
 ## Local development
@@ -106,9 +106,34 @@ Node 20.9+ is required; Node 22+ is recommended.
   - redemption is rate-limited, and the token is removed from the URL after use.
 - **Logging:** logs are structured JSON with tokens, cookies and personal data redacted. Security-relevant changes are written to `audit_events`.
 
+## Categories and keywords
+
+Every user's categories are created from the global `default_categories` catalog. Each user's copy
+remembers its catalog entry (`categories.default_category_id`), so renaming it doesn't break anything.
+
+Transactions are matched against `category_map_keyword` (whole words, in merchant, narration and
+UPI handle). A user's own keywords, saved whenever they change a category by hand, win over shared
+ones; otherwise the longest shared keyword wins. Shared keywords are seeded, learned by the AI, or
+added by hand in the Supabase SQL editor:
+
+```sql
+-- A new keyword for everyone
+insert into category_map_keyword (keyword, default_category_id)
+select 'blinkit', id from default_categories where name = 'Groceries';
+
+-- A new category for everyone (existing users get it automatically)
+insert into default_categories (name, kind_hint, color) values ('Pets', 'expense', '#a61e4d');
+```
+
+Keywords are lower-case letters, digits and spaces. Payments to people are never mapped; they get
+the **Individual** category.
+
 ## Stored layouts: verification status
 
-The seeded layouts were written from published layouts and tested only against synthetic fixtures (`tests/fixtures/synthetic`). Layouts learned by AI are proved on the file that taught them. All are `verified = false` until checked against a real anonymised export:
+Layouts are learned by AI and proved on the file that taught them (at least 90% of its rows must
+parse). PDFs are always read by AI; their stored layout only records the source, keyed by a hash of
+the statement's header lines. All layouts are `verified = false` until checked against a real
+anonymised export:
 
 1. Add the export under `tests/fixtures/real/` with a test next to `tests/unit/import/engine.test.ts`.
 2. Set `verified = true` on its `import_layouts` row.

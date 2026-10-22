@@ -45,6 +45,8 @@ export type CategoryRow = Timestamps & {
   kind_hint: TransactionKind;
   color: string | null;
   is_system: boolean;
+  /** The catalog entry (default_categories) this category was created from, if any. */
+  default_category_id: string | null;
 };
 
 
@@ -262,9 +264,9 @@ export type ExpenseEventRow = {
   created_at: string;
 };
 
-export type ImportLayoutKind = "table" | "text" | "llm_extract";
+export type ImportLayoutKind = "table" | "llm_extract";
 
-/** Shared (not per-user) statement layout: how to read one bank's/app's export. */
+/** Shared (not per-user) statement layout, learned by the LLM: how to read one bank's/app's export. */
 export type ImportLayoutRow = {
   id: string;
   kind: ImportLayoutKind;
@@ -273,7 +275,7 @@ export type ImportLayoutRow = {
   source_kind: SourceKind;
   source_app: string;
   config: unknown;
-  origin: "seed" | "llm";
+  origin: "llm" | "manual";
   priority: number;
   verified: boolean;
   use_count: number;
@@ -281,13 +283,19 @@ export type ImportLayoutRow = {
   created_at: string;
 };
 
-/** Keyword → category. user_id null = shared (seed/LLM); set = that user's own correction. */
-export type CategoryMapRow = Timestamps & {
+/**
+ * Keyword → category. Shared rows (user_id null) point at the catalog via default_category_id;
+ * a user's own rows point at their category via category_id.
+ */
+export type CategoryKeywordRow = Timestamps & {
   id: string;
-  user_id: string | null;
   keyword: string;
-  category_name: string;
+  default_category_id: string | null;
+  user_id: string | null;
+  category_id: string | null;
   transaction_kind: TransactionKind | null;
-  origin: "seed" | "llm" | "user";
+  origin: CategoryKeywordOrigin;
   use_count: number;
 };
+
+export type CategoryKeywordOrigin = "seed" | "llm" | "user" | "manual";

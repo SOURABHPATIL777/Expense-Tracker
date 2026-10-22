@@ -12,8 +12,8 @@ let cache: { at: number; rows: ImportLayoutRow[] } | null = null;
 export type NewLayout = Pick<ImportLayoutRow, "kind" | "signature" | "label" | "source_kind" | "source_app" | "config">;
 
 /**
- * Statement layouts shared by every user (server-only table). Seeded from the former presets;
- * the LLM adds a layout the first time it works out an unknown file, so the next file skips it.
+ * Statement layouts shared by every user (server-only table). Nothing is seeded: the LLM adds a
+ * layout the first time it works out an unknown file, so the next file with it (any user) skips it.
  */
 export class ImportLayoutsRepository {
   private readonly db = getAdminClient();
@@ -28,9 +28,9 @@ export class ImportLayoutsRepository {
     return rows;
   }
 
-  /** Layouts that can parse a file deterministically, with their configs. */
+  /** CSV/Excel layouts that parse a file without the LLM, with their configs. */
   async parsers(): Promise<Array<{ layout: ImportLayoutRow; config: ImportConfig }>> {
-    return (await this.all()).filter((l) => l.kind !== "llm_extract").map((layout) => ({ layout, config: layout.config as ImportConfig }));
+    return (await this.all()).filter((l) => l.kind === "table").map((layout) => ({ layout, config: layout.config as ImportConfig }));
   }
 
   async find(kind: ImportLayoutKind, signature: string): Promise<ImportLayoutRow | null> {

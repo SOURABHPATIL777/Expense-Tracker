@@ -7,12 +7,12 @@ import { LLM_CONFIDENCE_THRESHOLD } from "@/backend/constants/llm.constants";
 import type { TransactionKind } from "@/backend/constants/enums.constants";
 import { TABLES } from "@/backend/constants/db.constants";
 import { CategoriesRepository, RulesRepository } from "@/backend/repositories/categorization.repository";
-import { CategoryMapRepository } from "@/backend/repositories/categoryMap.repository";
+import { CategoryKeywordsRepository } from "@/backend/repositories/categoryKeywords.repository";
 import { TransactionsRepository } from "@/backend/repositories/transactions.repository";
 import { ReviewItemsRepository, type NewReviewItem } from "@/backend/repositories/reviewItems.repository";
 import type { CategoryRow, RuleRow, TransactionRow } from "@/backend/repositories/types";
 import { firstMatchingRule, type Rule } from "@/backend/domain/rules";
-import { keywordAppearsIn, matchCategory, normalizeKeyword } from "@/backend/domain/categoryMap";
+import { keywordAppearsIn, matchCategory, normalizeKeyword, resolveCategory } from "@/backend/domain/categoryMap";
 import { looksLikeIndividual } from "@/backend/domain/individual";
 import { llmTaskEnabled, runLlmTask } from "@/backend/llm/run";
 import { CATEGORIZE_INSTRUCTIONS, categorizeData, categorizeSchema } from "@/backend/llm/prompts/categorize";
@@ -20,7 +20,7 @@ import { CATEGORIZE_INSTRUCTIONS, categorizeData, categorizeSchema } from "@/bac
 /** Decided from the statement itself at import time; rules may override, the map and LLM may not. */
 const DETERMINISTIC_KINDS = new Set<TransactionKind>(["self_transfer", "refund", "reversal", "cc_bill_payment"]);
 
-/** Name of the default category for person-to-person payments (seeded for every user). */
+/** Catalog name of the default category for person-to-person payments. */
 export const INDIVIDUAL_CATEGORY = "Individual";
 
 export type ClassifyScope = { scope: "import"; importId: string; cursor?: string } | { scope: "all"; cursor?: string };
@@ -63,13 +63,14 @@ function kindFor(t: TransactionRow, category: CategoryRow | undefined, explicit?
  *   your rules → own transfers/refunds/card bills from the statement → category map (your own
  *   choices first, then the longest shared keyword) → person-to-person ("Individual") → LLM.
  * The LLM only sees what's still uncategorised, and each keyword it uses (verified to be in the
- * text) is saved to the shared map so the next occurrence needs no LLM call.
+ * text) is saved so the next occurrence needs no LLM call: shared with everyone when the category
+ * is a catalog one, or for this user only when it is one of their own categories.
  */
 export function classificationService(db: Db, log: Logger) {
   const transactions = new TransactionsRepository(db);
   const categoriesRepo = new CategoriesRepository(db);
   const rulesRepo = new RulesRepository(db);
-  const categoryMap = new CategoryMapRepository(db);
+  const keywords = new CategoryKeywordsRepository(db);
   const reviews = new ReviewItemsRepository(db);
 
   /** Next keyset page of transactions to classify for a scope. */
@@ -94,13 +95,20 @@ export function classificationService(db: Db, log: Logger) {
     return { rows, cursor: ids.length === limit ? ids.at(-1)! : null };
   }
 
-  async function llmPass(userId: string, pending: TransactionRow[], categories: CategoryRow[], patches: Map<string, Patch>, reviewItems: NewReviewItem[]) {
+  async function llmPass(
+    userId: string,
+    pending: TransactionRow[],
+    categories: CategoryRow[],
+    individual: CategoryRow | undefined,
+    patches: Map<string, Patch>,
+    reviewItems: NewReviewItem[],
+  ) {
     if (!llmTaskEnabled("categorize") || categories.length === 0) return;
     const names = categories.map((c) => c.name);
     const schema = categorizeSchema(names as [string, ...string[]]);
     const byName = new Map(categories.map((c) => [c.name, c]));
-    const individual = byName.get(INDIVIDUAL_CATEGORY);
-    const learned = new Map<string, { keyword: string; categoryName: string; transactionKind: TransactionKind | null }>();
+    const shared = new Map<string, { keyword: string; defaultCategoryId: string; transactionKind: TransactionKind | null }>();
+    const own = new Map<string, { categoryId: string; transactionKind: TransactionKind | null }>();
 
     for (let i = 0; i < pending.length; i += JOBS.LLM_BATCH_SIZE) {
       const batch = pending.slice(i, i + JOBS.LLM_BATCH_SIZE);
@@ -140,12 +148,13 @@ export function classificationService(db: Db, log: Logger) {
         }
         // Only a confident, business keyword that really appears in the text is shared with everyone.
         const keyword = normalizeKeyword(item.keyword);
-        if (!item.isIndividual && category && keyword && keywordAppearsIn(matchTexts(t), keyword)) {
-          learned.set(keyword, { keyword, categoryName: category.name, transactionKind: explicitKind });
-        }
+        if (item.isIndividual || !category || !keyword || !keywordAppearsIn(matchTexts(t), keyword)) continue;
+        if (category.default_category_id) shared.set(keyword, { keyword, defaultCategoryId: category.default_category_id, transactionKind: explicitKind });
+        else own.set(keyword, { categoryId: category.id, transactionKind: explicitKind });
       }
     }
-    if (learned.size) log.info({ added: await categoryMap.learnShared([...learned.values()]) }, "category keywords learned");
+    for (const [keyword, e] of own) await keywords.learnForUser(userId, keyword, e.categoryId, e.transactionKind, "llm");
+    if (shared.size || own.size) log.info({ shared: await keywords.learnShared([...shared.values()]), own: own.size }, "category keywords learned");
   }
 
   /** Classifies one batch; returns the cursor for the next batch, or null when the scope is done. */
@@ -153,10 +162,14 @@ export function classificationService(db: Db, log: Logger) {
     const { rows, cursor } = await nextBatch(userId, scope);
     if (rows.length === 0) return cursor;
 
-    const [categories, rules, entries] = await Promise.all([categoriesRepo.listAll(userId), rulesRepo.listActive(userId), categoryMap.entriesFor(userId)]);
+    const [categories, rules, entries, individualId] = await Promise.all([
+      categoriesRepo.listAll(userId),
+      rulesRepo.listActive(userId),
+      keywords.entriesFor(userId),
+      keywords.catalogId(INDIVIDUAL_CATEGORY),
+    ]);
     const categoryById = new Map(categories.map((c) => [c.id, c]));
-    const categoryByName = new Map(categories.map((c) => [c.name.toLowerCase(), c]));
-    const individual = categoryByName.get(INDIVIDUAL_CATEGORY.toLowerCase());
+    const individual = individualId ? categories.find((c) => c.default_category_id === individualId) : undefined;
     const domainRules = rules.map(toRule);
 
     const patches = new Map<string, Patch>();
@@ -171,7 +184,7 @@ export function classificationService(db: Db, log: Logger) {
       if (DETERMINISTIC_KINDS.has(t.transaction_kind) || t.status !== "success") continue;
 
       const mapped = matchCategory(matchTexts(t), entries);
-      const mappedCategory = mapped ? categoryByName.get(mapped.categoryName.toLowerCase()) : undefined;
+      const mappedCategory = mapped ? resolveCategory(mapped, categories) : null;
       if (mapped && mappedCategory) {
         patches.set(t.id, {
           category_id: mappedCategory.id,
@@ -194,7 +207,7 @@ export function classificationService(db: Db, log: Logger) {
     await savePatches(userId, patches);
     patches.clear();
     if (pendingLlm.length) {
-      await llmPass(userId, pendingLlm, categories, patches, reviewItems);
+      await llmPass(userId, pendingLlm, categories, individual, patches, reviewItems);
       await savePatches(userId, patches);
       await reviews.openMany(userId, reviewItems);
     }

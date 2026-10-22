@@ -3,11 +3,24 @@ import type { TransactionKind } from "@/backend/constants/enums.constants";
 
 export type MapEntry = {
   keyword: string;
-  categoryName: string;
+  /** Set on a user's own row: their category. */
+  categoryId: string | null;
+  /** Set on a shared row: the catalog category, resolved to each user's copy of it. */
+  defaultCategoryId: string | null;
   transactionKind: TransactionKind | null;
   /** A user's own correction (beats any shared mapping). */
   userScoped: boolean;
 };
+
+/**
+ * The user's category for a map entry: their own category, or their copy of the catalog one.
+ * Null when they have since deleted it (the transaction then falls through to the next step).
+ */
+export function resolveCategory<C extends { id: string; default_category_id: string | null }>(entry: MapEntry, categories: readonly C[]): C | null {
+  if (entry.categoryId) return categories.find((c) => c.id === entry.categoryId) ?? null;
+  if (entry.defaultCategoryId) return categories.find((c) => c.default_category_id === entry.defaultCategoryId) ?? null;
+  return null;
+}
 
 /** Lower-case, everything except letters and digits becomes a space: "SWIGGY.STORES@AXIS" → "swiggy stores axis". */
 export const normalizeForMatch = (text: string) =>

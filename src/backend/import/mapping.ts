@@ -3,7 +3,7 @@ import { z } from "zod";
 import { AppError } from "@/backend/errors/AppError";
 import type { SourceApp, SourceKind } from "@/backend/constants/enums.constants";
 import { headerSignature, normalizeHeader } from "./text";
-import type { AmountSpec, ExtractResult, ImportConfig, TableColumns } from "./types";
+import type { AmountSpec, ExtractResult, ImportConfig, TableColumns, TableRead } from "./types";
 
 /** Date formats a mapping may choose (tokens understood by the date parser in ./dates). */
 export const DATE_FORMAT_OPTIONS = [
@@ -103,4 +103,31 @@ export function parsedShare(result: ExtractResult): { share: number; parsed: num
   const parsed = result.rows.filter((r) => r.parsed).length;
   const failures = result.rows.filter((r) => !r.parsed).slice(0, 3).map((r) => `row ${r.rowIndex + 1}: ${r.error}`);
   return { share: total ? parsed / total : 0, parsed, total, failures };
+}
+
+const AMOUNT_LIKE = /^[+-]?\s*(₹|rs\.?|inr)?\s*[\d,]+\.\d{1,2}(\s*(dr|cr))?$/i;
+
+/**
+ * Checks an LLM mapping beyond "the rows parse": each column holds one field, and identifier
+ * columns don't hold money. Returns the problems found (empty when the mapping is sound).
+ */
+export function mappingProblems(input: MappingInput, read: TableRead): string[] {
+  const problems: string[] = [];
+  const a = input.amount;
+  const amountColumns: Record<string, number> = a.mode === "split" ? { debit: a.debit, credit: a.credit } : a.mode === "signed" ? { amount: a.amount } : { amount: a.amount, type: a.type };
+  const used = Object.entries({ ...input.columns, ...amountColumns });
+  const byIndex = new Map<number, string[]>();
+  for (const [field, index] of used) if (index !== undefined) byIndex.set(index, [...(byIndex.get(index) ?? []), field]);
+  for (const [index, fields] of byIndex) if (fields.length > 1) problems.push(`column ${index} was used for ${fields.join(" and ")}; each column holds one field`);
+
+  const dataRows = read.rows.slice(input.headerRowIndex + 1);
+  for (const field of ["reference", "appTransactionId"] as const) {
+    const index = input.columns[field];
+    if (index === undefined) continue;
+    const values = dataRows.map((r) => r[index]?.trim()).filter((v): v is string => Boolean(v));
+    if (values.length && values.filter((v) => AMOUNT_LIKE.test(v)).length * 2 > values.length) {
+      problems.push(`the ${field} column holds amounts (e.g. "${values[0]}"); choose the UTR/reference column or omit it`);
+    }
+  }
+  return problems;
 }

@@ -2,7 +2,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { getAdminClient, type Db } from "@/backend/supabase/clients";
 import { CategoriesRepository, RulesRepository } from "@/backend/repositories/categorization.repository";
-import { CategoryMapRepository } from "@/backend/repositories/categoryMap.repository";
+import { CategoryKeywordsRepository } from "@/backend/repositories/categoryKeywords.repository";
 import { TransactionsRepository } from "@/backend/repositories/transactions.repository";
 import { toCategoryDto, toCategoryRow, toRuleDto, toRuleRow } from "@/backend/mappers/transactions.mapper";
 import { matchCategory, normalizeKeyword } from "@/backend/domain/categoryMap";
@@ -52,7 +52,7 @@ export function rulesService(db: Db) {
 
 /**
  * A user's manual category choice: locks the transaction against rules/AI and records the choice
- * in the user's own category map, so the same merchant is categorised this way from now on.
+ * as one of the user's own category keywords, so the same merchant is categorised this way from now on.
  * Payments to people are not mapped (a person isn't a merchant); a rule handles a specific person.
  */
 export async function recategorize(db: Db, userId: string, transactionId: string, categoryId: string, kind?: TransactionKind): Promise<void> {
@@ -70,9 +70,9 @@ export async function recategorize(db: Db, userId: string, transactionId: string
   });
 
   if (looksLikeIndividual({ merchant: tx.merchant_normalized ?? tx.merchant_raw, vpa: tx.counterparty_vpa, narration: tx.narration })) return;
-  const map = new CategoryMapRepository(db);
+  const keywords = new CategoryKeywordsRepository(db);
   // Reuse the keyword that identified this merchant; otherwise learn its name.
-  const matched = matchCategory(matchTexts(tx), await map.entriesFor(userId));
+  const matched = matchCategory(matchTexts(tx), await keywords.entriesFor(userId));
   const keyword = matched?.keyword ?? normalizeKeyword(tx.merchant_normalized ?? tx.merchant_raw);
-  if (keyword) await map.learnForUser(userId, keyword, category.name, kind ?? null);
+  if (keyword) await keywords.learnForUser(userId, keyword, category.id, kind ?? null, "user");
 }
