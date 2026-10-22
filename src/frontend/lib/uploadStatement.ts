@@ -39,5 +39,6 @@ export async function uploadStatement(file: File, opts: { onStage?: (s: UploadSt
   if (!put.ok) throw new ApiError("UPLOAD_FAILED", "The file upload failed. Please try again.", put.status);
 
   opts.onStage?.("queuing");
-  return (await api.post<ImportDto>(API_ROUTES.importUploaded(data.import.id))).data;
+  // Safe to repeat: the server ignores it once the import has moved on.
+  return (await api.post<ImportDto>(API_ROUTES.importUploaded(data.import.id), undefined, { retry: true })).data;
 }

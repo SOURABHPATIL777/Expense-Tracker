@@ -85,9 +85,11 @@ Node 20.9+ is required; Node 22+ is recommended.
 1. Import the repo and set the variables from `.env.example`.
 2. **No cron is needed.** Background jobs run in the app itself:
    - Uploads, column mappings and "re-apply rules" start the worker right after the response, via `after()`.
-   - Every signed-in API request also starts a short worker pass, at most once a minute per instance. This picks up retried or interrupted jobs.
+   - Every signed-in API request also starts a short worker pass, at most once a minute per instance, unless a worker is already busy. This picks up retried or interrupted jobs.
+   - `vercel.json` gives every API route 60 s, so a background pass always fits inside its function.
 3. After deploying:
    - check `GET /api/v1/health` returns `ok`.
+4. **Use the production domain**, or turn off Vercel Authentication (Settings → Deployment Protection) for the URL you use. Protected preview/branch URLs (`…-git-main-….vercel.app`) redirect API calls to the Vercel login once that login expires; the app then says "Your session for this site has expired".
 
 ### 4. AI (Ollama)
 - **Where it runs:** set `OLLAMA_API_KEY` (an ollama.com key) for Ollama Cloud, the default. For a local or self-hosted Ollama, set `OLLAMA_BASE_URL`, e.g. `http://localhost:11434/api`. A deployed app can't reach `localhost` on your laptop.

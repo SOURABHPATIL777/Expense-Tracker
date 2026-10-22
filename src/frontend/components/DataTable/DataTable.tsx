@@ -30,7 +30,7 @@ type DataTableProps<T> = {
   caption?: string;
 };
 
-/** The one table used by every list in the app. */
+/** The one table used by every list in the app. Below 640px each row becomes a card (labels from the headers). */
 export function DataTable<T>({ columns, rows, rowKey, loading, error, empty, onRowClick, pagination, caption }: DataTableProps<T>) {
   if (error) return <Alert tone="danger" title="Could not load data">{error.message}</Alert>;
   if (loading && rows.length === 0) return <Skeleton lines={5} />;
@@ -60,7 +60,7 @@ export function DataTable<T>({ columns, rows, rowKey, loading, error, empty, onR
                 tabIndex={onRowClick ? 0 : undefined}
               >
                 {columns.map((c) => (
-                  <td key={c.key} className={cx(styles[c.align ?? "left"], c.hideOnMobile && styles.mobileHidden)}>
+                  <td key={c.key} data-label={c.header || undefined} className={cx(styles[c.align ?? "left"], c.hideOnMobile && styles.mobileHidden)}>
                     {c.render(row)}
                   </td>
                 ))}

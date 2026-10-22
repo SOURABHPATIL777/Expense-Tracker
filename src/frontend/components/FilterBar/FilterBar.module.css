@@ -10,3 +10,20 @@
 .reset {
   margin-left: auto;
 }
+
+/* Phones: filters in a two-column grid, reset full width. */
+@media (max-width: 640px) {
+  .bar {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .bar > * {
+    min-width: 0;
+  }
+
+  .reset {
+    grid-column: 1 / -1;
+    margin-left: 0;
+  }
+}

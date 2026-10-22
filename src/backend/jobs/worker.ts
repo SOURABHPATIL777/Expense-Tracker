@@ -88,5 +88,22 @@ let lastOpportunisticKick = 0;
 export function kickWorkerOpportunistically(now = Date.now()): void {
   if (now - lastOpportunisticKick < JOBS.OPPORTUNISTIC_INTERVAL_MS) return;
   lastOpportunisticKick = now;
-  kickWorker(JOBS.OPPORTUNISTIC_BUDGET_MS);
+  // A pass that's already running (e.g. reading a PDF with the LLM after an upload) picks up the
+  // rest itself; stacking another long pass onto ordinary requests like polls only adds load.
+  after(() =>
+    workerBusy()
+      .then((busy) => (busy ? undefined : runWorker({ budgetMs: JOBS.OPPORTUNISTIC_BUDGET_MS })))
+      .catch((err) => logger.error({ err }, "opportunistic worker failed")),
+  );
+}
+
+/** True while some worker holds a live lock on a job. */
+async function workerBusy(): Promise<boolean> {
+  const { count, error } = await getAdminClient()
+    .from(TABLES.JOBS)
+    .select("id", { count: "exact", head: true })
+    .eq("status", "running")
+    .gt("locked_until", new Date().toISOString());
+  if (error) throw error;
+  return (count ?? 0) > 0;
 }

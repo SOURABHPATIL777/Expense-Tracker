@@ -26,7 +26,21 @@ type RequestOptions = {
   query?: Query;
   idempotencyKey?: string;
   signal?: AbortSignal;
+  /** Retry when the request never got a response. Defaults to true for GET and keyed (idempotent) writes. */
+  retry?: boolean;
 };
+
+/** Waits before each retry of a request that got no response (a dropped connection, a cold start). */
+const RETRY_DELAYS_MS = [400, 1200];
+
+const sleep = (ms: number, signal?: AbortSignal) =>
+  new Promise<void>((resolve, reject) => {
+    const t = setTimeout(resolve, ms);
+    signal?.addEventListener("abort", () => {
+      clearTimeout(t);
+      reject(new DOMException("Aborted", "AbortError"));
+    });
+  });
 
 export type ApiResult<T> = { data: T; meta?: PageMeta };
 
@@ -43,18 +57,28 @@ async function request<T>(method: string, url: string, opts: RequestOptions = {}
   if (opts.body !== undefined) headers["Content-Type"] = "application/json";
   if (opts.idempotencyKey) headers["Idempotency-Key"] = opts.idempotencyKey;
 
-  let res: Response;
-  try {
-    res = await fetch(withQuery(url, opts.query), {
-      method,
-      headers,
-      body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
-      credentials: "same-origin",
-      signal: opts.signal,
-    });
-  } catch (err) {
-    if ((err as Error).name === "AbortError") throw err;
-    throw new ApiError("NETWORK", "Could not reach the server. Check your connection.", 0);
+  const retries = (opts.retry ?? (method === "GET" || Boolean(opts.idempotencyKey))) ? RETRY_DELAYS_MS : [];
+  let res: Response | undefined;
+  for (let attempt = 0; !res; attempt++) {
+    try {
+      res = await fetch(withQuery(url, opts.query), {
+        method,
+        headers,
+        body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
+        credentials: "same-origin",
+        // A redirect here is never ours (API routes don't redirect): typically a hosting login page.
+        redirect: "manual",
+        signal: opts.signal,
+      });
+    } catch (err) {
+      if ((err as Error).name === "AbortError") throw err;
+      if (attempt >= retries.length) throw new ApiError("NETWORK", "Could not reach the server. Check your connection and try again.", 0);
+      await sleep(retries[attempt], opts.signal);
+    }
+  }
+
+  if (res.type === "opaqueredirect" || (res.status >= 300 && res.status < 400)) {
+    throw new ApiError("SESSION_REDIRECT", "Your session for this site has expired. Reload the page to sign in again.", res.status);
   }
 
   if (res.status === 204) return { data: null as T };

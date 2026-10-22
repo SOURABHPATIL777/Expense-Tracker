@@ -8,6 +8,9 @@ export function AuthCard({ title, subtitle, children, footer }: { title: string;
   return (
     <main className={styles.page}>
       <Link href={PAGE_ROUTES.home} className={styles.brand}>
+        <span className={styles.logo} aria-hidden>
+          ₹
+        </span>
         UPI Spend
       </Link>
       <section className={styles.card}>

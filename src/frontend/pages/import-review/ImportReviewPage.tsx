@@ -103,6 +103,7 @@ export default function ImportReviewPage() {
           <StatusBadge value={d.status} map={IMPORT_STATUS_LABELS} />
           {d.detectedLabel && <span className={styles.muted}>Detected as: {d.detectedLabel}</span>}
           {d.readByAi && <Badge tone="warning">Read by AI, please check the rows</Badge>}
+          {imp.stale && <span className={styles.muted}>Reconnecting…</span>}
         </div>
 
         {d.errorMessage && (

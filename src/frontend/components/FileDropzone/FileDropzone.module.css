@@ -2,16 +2,17 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--space-1);
+  gap: var(--space-2);
   padding: var(--space-6) var(--space-4);
-  border: 2px dashed var(--color-border-strong);
+  border: 2px dashed color-mix(in srgb, var(--color-accent) 35%, var(--color-border));
   border-radius: var(--radius-lg);
-  background: var(--color-surface-muted);
+  background: color-mix(in srgb, var(--color-accent-soft) 55%, var(--color-surface));
   text-align: center;
   cursor: pointer;
   transition:
     border-color var(--transition-fast),
-    background var(--transition-fast);
+    background var(--transition-fast),
+    transform var(--transition-fast);
 }
 
 .zone:hover,
@@ -20,13 +21,49 @@
   background: var(--color-accent-soft);
 }
 
+.zone:active {
+  transform: scale(0.99);
+}
+
+.zone:has(input:focus-visible) {
+  outline: 3px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
 .disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }
 
+.icon {
+  display: grid;
+  place-items: center;
+  width: 3.25rem;
+  height: 3.25rem;
+  border-radius: var(--radius-pill);
+  background: var(--gradient-brand);
+  color: var(--color-on-brand);
+  box-shadow: var(--shadow-lg);
+}
+
 .title {
-  font-weight: var(--weight-semibold);
+  font-size: var(--text-md);
+  font-weight: var(--weight-bold);
+}
+
+.touch {
+  display: none;
+}
+
+/* Touch screens have no drag and drop, so the copy just says tap. */
+@media (hover: none) {
+  .pointer {
+    display: none;
+  }
+
+  .touch {
+    display: inline;
+  }
 }
 
 .hint {
@@ -34,8 +71,13 @@
   font-size: var(--text-xs);
 }
 
-.error {
-  margin-top: var(--space-2);
+.errors {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  list-style: none;
   color: var(--color-danger);
   font-size: var(--text-sm);
 }

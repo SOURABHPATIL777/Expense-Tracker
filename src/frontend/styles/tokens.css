@@ -2,36 +2,58 @@
 :root {
   color-scheme: light;
 
-  --color-bg: #f6f7f9;
+  /* Surfaces */
+  --color-bg: #f5f5fa;
   --color-surface: #ffffff;
-  --color-surface-muted: #f0f2f5;
-  --color-border: #e2e5ea;
-  --color-border-strong: #c9ced6;
-  --color-text: #15181d;
-  --color-text-muted: #5b6370;
-  --color-text-subtle: #8a919c;
+  --color-surface-muted: #f1f1f7;
+  --color-border: #e6e6ef;
+  --color-border-strong: #cfcfdc;
+  --color-text: #12131a;
+  --color-text-muted: #555869;
+  --color-text-subtle: #8a8d9c;
 
-  --color-accent: #3b5bdb;
-  --color-accent-hover: #3249b8;
-  --color-accent-soft: #e8edfd;
+  /* Brand: indigo, with a violet end for hero gradients (UI only, never a chart series). */
+  --color-accent: #4f46e5;
+  --color-accent-hover: #4338ca;
+  --color-accent-soft: #eef0ff;
   --color-on-accent: #ffffff;
+  --gradient-brand: linear-gradient(135deg, #4f46e5 0%, #6d3fe6 55%, #8b3dea 100%);
+  --color-on-brand: #ffffff;
+  --color-on-brand-muted: rgb(255 255 255 / 78%);
+  --color-on-brand-chip: rgb(255 255 255 / 16%);
 
-  --color-success: #1f8a4c;
-  --color-success-soft: #e3f4ea;
-  --color-warning: #a86400;
-  --color-warning-soft: #fdf1dc;
-  --color-danger: #c92a2a;
-  --color-danger-soft: #fde8e8;
-  --color-info: #1971c2;
-  --color-info-soft: #e3effb;
-  --color-neutral-soft: #eceef1;
+  /* Status (reserved; always shipped with a label or icon) */
+  --color-success: #0f8a57;
+  --color-success-soft: #e4f6ee;
+  --color-warning: #b25e00;
+  --color-warning-soft: #fff2e0;
+  --color-danger: #d92d20;
+  --color-danger-soft: #feebe9;
+  --color-info: #1d6fd8;
+  --color-info-soft: #e6f0fd;
+  --color-neutral-soft: #ededf3;
 
   --color-debit: var(--color-text);
   --color-credit: var(--color-success);
-  --color-focus: #3b5bdb66;
-  --color-overlay: rgb(15 18 25 / 45%);
+  --color-focus: #4f46e566;
+  --color-overlay: rgb(14 15 25 / 50%);
 
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif;
+  /*
+   * Categorical chart palette: fixed order, never cycled. Validated (CVD + normal-vision
+   * separation) against the card surface in each mode with the dataviz validator; slots 3-5
+   * are below 3:1 on light, so charts always ship direct labels or a legend with values.
+   */
+  --chart-1: #2a78d6;
+  --chart-2: #eb6834;
+  --chart-3: #1baf7a;
+  --chart-4: #eda100;
+  --chart-5: #e87ba4;
+  --chart-6: #008300;
+  --chart-7: #6250d6;
+  --chart-8: #e34948;
+  --chart-other: #a3a6b4;
+
+  --font-sans: var(--font-brand, ui-sans-serif), system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
   --text-xs: 0.75rem;
@@ -40,11 +62,13 @@
   --text-lg: 1.125rem;
   --text-xl: 1.375rem;
   --text-2xl: 1.75rem;
+  --text-3xl: 2.25rem;
 
   --weight-regular: 400;
   --weight-medium: 500;
   --weight-semibold: 600;
   --weight-bold: 700;
+  --weight-extrabold: 800;
 
   --space-1: 0.25rem;
   --space-2: 0.5rem;
@@ -54,51 +78,69 @@
   --space-6: 2rem;
   --space-7: 3rem;
 
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
   --radius-pill: 999px;
 
-  --shadow-sm: 0 1px 2px rgb(16 24 40 / 6%);
-  --shadow-md: 0 4px 16px rgb(16 24 40 / 10%);
+  --shadow-sm: 0 1px 2px rgb(20 20 50 / 5%), 0 1px 1px rgb(20 20 50 / 3%);
+  --shadow-md: 0 6px 24px rgb(30 27 75 / 8%), 0 1px 3px rgb(30 27 75 / 5%);
+  --shadow-lg: 0 18px 48px rgb(49 46 129 / 22%);
 
-  --sidebar-width: 232px;
-  --content-max: 1200px;
-  --control-height: 2.5rem;
-  --transition-fast: 120ms ease;
+  --sidebar-width: 248px;
+  --content-max: 1180px;
+  --control-height: 2.75rem;
+  --topbar-height: 3.5rem;
+  --tabbar-height: 4.25rem;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --transition-fast: 140ms ease;
+  --transition-med: 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
 
-    --color-bg: #0f1115;
-    --color-surface: #171a21;
-    --color-surface-muted: #1e222b;
-    --color-border: #2a2f3a;
-    --color-border-strong: #3a4150;
-    --color-text: #eceef2;
-    --color-text-muted: #a3aab6;
-    --color-text-subtle: #737b88;
+    --color-bg: #0e0f14;
+    --color-surface: #171922;
+    --color-surface-muted: #1f222d;
+    --color-border: #2a2d3a;
+    --color-border-strong: #3a3e4e;
+    --color-text: #eef0f6;
+    --color-text-muted: #a6a9ba;
+    --color-text-subtle: #767a8c;
 
-    --color-accent: #7c94f5;
-    --color-accent-hover: #93a7f7;
-    --color-accent-soft: #232b48;
-    --color-on-accent: #0f1115;
+    --color-accent: #8b8cf8;
+    --color-accent-hover: #a2a3fa;
+    --color-accent-soft: #24264a;
+    --color-on-accent: #0e0f14;
+    --gradient-brand: linear-gradient(135deg, #3f37c9 0%, #5b32c9 55%, #7230c9 100%);
 
-    --color-success: #4fc580;
-    --color-success-soft: #173326;
-    --color-warning: #f0b453;
-    --color-warning-soft: #3a2c12;
-    --color-danger: #f37272;
-    --color-danger-soft: #3b1a1a;
-    --color-info: #6cb2f2;
-    --color-info-soft: #16293d;
-    --color-neutral-soft: #262b35;
+    --color-success: #3ccf8e;
+    --color-success-soft: #13301f;
+    --color-warning: #f5b552;
+    --color-warning-soft: #352710;
+    --color-danger: #f97066;
+    --color-danger-soft: #3b1714;
+    --color-info: #67a9f5;
+    --color-info-soft: #13253c;
+    --color-neutral-soft: #252836;
 
-    --color-focus: #7c94f566;
-    --color-overlay: rgb(0 0 0 / 60%);
+    --chart-1: #3987e5;
+    --chart-2: #d95926;
+    --chart-3: #199e70;
+    --chart-4: #c98500;
+    --chart-5: #d55181;
+    --chart-6: #008300;
+    --chart-7: #9085e9;
+    --chart-8: #e66767;
+    --chart-other: #6b6f82;
+
+    --color-focus: #8b8cf866;
+    --color-overlay: rgb(0 0 0 / 62%);
     --shadow-sm: 0 1px 2px rgb(0 0 0 / 40%);
-    --shadow-md: 0 4px 16px rgb(0 0 0 / 50%);
+    --shadow-md: 0 6px 24px rgb(0 0 0 / 45%);
+    --shadow-lg: 0 18px 48px rgb(0 0 0 / 55%);
   }
 }
