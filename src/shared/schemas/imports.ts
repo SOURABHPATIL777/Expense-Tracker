@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { IMPORT_STATUSES, type Direction, type ImportStatus, type SourceApp, type SourceKind } from "../constants/enums";
+import { IMPORT_DELETE_MODES, IMPORT_STATUSES, type Direction, type ImportStatus, type SourceApp, type SourceKind } from "../constants/enums";
 import { UPLOAD } from "../constants/limits";
 import { ALL_FORMATS, FILE_FORMATS, formatForFileName } from "../constants/sources";
 import { paginationQuerySchema } from "./common";
@@ -19,6 +19,8 @@ export const createImportSchema = z
 export type CreateImportInput = z.infer<typeof createImportSchema>;
 
 export const importListQuerySchema = paginationQuerySchema.extend({ status: z.enum(IMPORT_STATUSES).optional() });
+
+export const deleteImportQuerySchema = z.object({ mode: z.enum(IMPORT_DELETE_MODES).default("all") });
 
 export const passwordSchema = z.object({ password: z.string().min(1, "Enter the password").max(128) });
 
@@ -46,6 +48,8 @@ export type ImportDto = {
   periodEnd: string | null;
   createdAt: string;
   completedAt: string | null;
+  /** Set when the statement file was deleted but its transactions were kept. */
+  fileDeletedAt: string | null;
 };
 
 export type CreateImportResultDto = { import: ImportDto; upload: { url: string } };

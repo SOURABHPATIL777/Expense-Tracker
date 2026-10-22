@@ -78,6 +78,7 @@ export type ImportRow = Timestamps & {
   period_start: string | null;
   period_end: string | null;
   completed_at: string | null;
+  file_deleted_at: string | null;
 };
 
 export type RawEventStatus = "pending" | "accepted" | "linked" | "duplicate" | "skipped" | "rejected";

@@ -7,6 +7,8 @@ import { Card } from "@/frontend/components/Card/Card";
 import { DataTable, type Column } from "@/frontend/components/DataTable/DataTable";
 import { DateText } from "@/frontend/components/DateText/DateText";
 import { FileDropzone } from "@/frontend/components/FileDropzone/FileDropzone";
+import { RowActions } from "@/frontend/components/RowActions/RowActions";
+import { DeleteImportDialog } from "@/frontend/components/DeleteImportDialog/DeleteImportDialog";
 import { StatusBadge, Badge } from "@/frontend/components/StatusBadge/StatusBadge";
 import { usePaginatedList } from "@/frontend/hooks/usePaginatedList";
 import { useMutation } from "@/frontend/hooks/useMutation";
@@ -24,7 +26,7 @@ const STAGE_LABELS: Record<UploadStage, string> = {
   queuing: "Starting import…",
 };
 
-const columns: Column<ImportDto>[] = [
+const columns = (onDelete: (i: ImportDto) => void): Column<ImportDto>[] => [
   {
     key: "file",
     header: "File",
@@ -35,6 +37,7 @@ const columns: Column<ImportDto>[] = [
           {i.sourceApp ? SOURCE_APP_LABELS[i.sourceApp] : "Detecting source…"}
           {i.readByAi && " · read by AI"}
         </span>
+        {i.fileDeletedAt && <Badge>File deleted</Badge>}
       </div>
     ),
   },
@@ -47,11 +50,13 @@ const columns: Column<ImportDto>[] = [
   },
   { key: "rows", header: "New / linked", align: "right", hideOnMobile: true, render: (i) => `${i.counts.imported} / ${i.counts.linked}` },
   { key: "created", header: "Uploaded", align: "right", render: (i) => <DateText iso={i.createdAt} /> },
+  { key: "actions", header: "", align: "right", width: "5rem", render: (i) => <RowActions onDelete={() => onDelete(i)} /> },
 ];
 
 export default function ImportsPage() {
   const router = useRouter();
   const [stage, setStage] = useState<UploadStage>();
+  const [deleting, setDeleting] = useState<ImportDto | null>(null);
   const history = usePaginatedList<ImportDto>(API_ROUTES.imports);
 
   const upload = useMutation((file: File) => uploadStatement(file, { onStage: setStage }), {
@@ -78,7 +83,7 @@ export default function ImportsPage() {
 
         <Card title="Import history" padded={false}>
           <DataTable
-            columns={columns}
+            columns={columns(setDeleting)}
             rows={history.rows}
             rowKey={(i) => i.id}
             loading={history.loading}
@@ -89,6 +94,8 @@ export default function ImportsPage() {
           />
         </Card>
       </div>
+
+      <DeleteImportDialog imp={deleting} onClose={() => setDeleting(null)} onDeleted={history.reload} />
     </>
   );
 }

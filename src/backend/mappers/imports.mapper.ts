@@ -28,6 +28,7 @@ export function toImportDto(r: ImportRow): ImportDto {
     periodEnd: r.period_end,
     createdAt: r.created_at,
     completedAt: r.completed_at,
+    fileDeletedAt: r.file_deleted_at,
   };
 }
 

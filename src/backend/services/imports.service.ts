@@ -4,9 +4,11 @@ import { getAdminClient, type Db } from "@/backend/supabase/clients";
 import type { Logger } from "@/backend/logger/logger";
 import { AppError, invalidState } from "@/backend/errors/AppError";
 import { AUDIT_ACTIONS, type ImportStatus } from "@/backend/constants/enums.constants";
+import type { ImportDeleteMode } from "@/shared/constants/enums";
 import { ImportsRepository } from "@/backend/repositories/imports.repository";
 import { RawEventsRepository } from "@/backend/repositories/rawEvents.repository";
 import { toImportDto, toImportRowDto } from "@/backend/mappers/imports.mapper";
+import type { ImportRow } from "@/backend/repositories/types";
 import { enqueueJob } from "@/backend/jobs/queue";
 import { kickWorker } from "@/backend/jobs/worker";
 import { pageMeta } from "./paginate";
@@ -17,6 +19,13 @@ import { importPipeline } from "./importPipeline.service";
 import type { PaginationQuery } from "@/shared/schemas/common";
 import type { CreateImportInput, CreateImportResultDto, ImportDto } from "@/shared/schemas/imports";
 
+/** Why the same file can't be uploaded again, by the existing import's status. */
+const DUPLICATE_MESSAGES: Partial<Record<ImportStatus, string>> = {
+  completed: "You've already imported this exact file.",
+  needs_password: "This file is waiting for its password. Open it from Imports to unlock it.",
+};
+const IN_PROGRESS_MESSAGE = "This file is already being imported.";
+
 /** Which job stage follows an extract result: more PDF chunks to read, or matching. */
 const NEXT_STAGE: Partial<Record<ImportStatus, "extract" | "process">> = { parsing: "extract", processing: "process" };
 
@@ -24,6 +33,18 @@ export function importsService(db: Db, log: Logger) {
   const imports = new ImportsRepository(db);
   const rawEvents = new RawEventsRepository(db);
   const files = new UploadedFilesRepository();
+
+  /** Removes the statement from storage and marks its file record deleted. */
+  async function removeStoredFile(row: ImportRow) {
+    await statementStorage.remove(row.file_path);
+    await files.setStatus(row.user_id, row.file_path, "deleted");
+  }
+
+  /** Deletes the import and every transaction that came only from it, then its file. */
+  async function removeAll(row: ImportRow) {
+    await imports.deleteCascade(row.id);
+    if (!row.file_deleted_at) await removeStoredFile(row);
+  }
 
   /** Jobs are service-role only, so enqueueing uses the admin client; the worker starts right after the response. */
   async function queueExtract(userId: string, importId: string, stage: "extract" | "process" = "extract") {
@@ -42,9 +63,15 @@ export function importsService(db: Db, log: Logger) {
     },
 
     async create(userId: string, input: CreateImportInput): Promise<CreateImportResultDto> {
-      const existing = await imports.findBySha(userId, input.sha256);
+      let existing = await imports.findBySha(userId, input.sha256);
+      // A failed import doesn't block the same file: it is replaced (with anything it partly imported).
+      if (existing?.status === "failed") {
+        await removeAll(existing);
+        await audit(db, { userId, action: AUDIT_ACTIONS.IMPORT_REPLACED, entityType: "import", entityId: existing.id, metadata: { fileName: existing.file_name } });
+        existing = null;
+      }
       if (existing && existing.status !== "uploaded") {
-        throw new AppError("CONFLICT", { message: "You've already imported this exact file.", details: { importId: existing.id } });
+        throw new AppError("CONFLICT", { message: DUPLICATE_MESSAGES[existing.status] ?? IN_PROGRESS_MESSAGE, details: { importId: existing.id } });
       }
       const row =
         existing ??
@@ -104,12 +131,21 @@ export function importsService(db: Db, log: Logger) {
       return { items: rows.map(toImportRowDto), meta: pageMeta(page, total) };
     },
 
-    async remove(userId: string, id: string): Promise<void> {
+    /**
+     * `all`: the import, its rows and the transactions that came only from it.
+     * `file`: only the stored statement of a completed import; its transactions stay.
+     */
+    async remove(userId: string, id: string, mode: ImportDeleteMode = "all"): Promise<void> {
       const row = await imports.findById(userId, id);
-      await imports.deleteCascade(id);
-      await statementStorage.remove(row.file_path);
-      await files.setStatus(userId, row.file_path, "deleted");
-      await audit(db, { userId, action: AUDIT_ACTIONS.IMPORT_DELETED, entityType: "import", entityId: id });
+      if (mode === "file") {
+        if (row.status !== "completed") throw invalidState("Only a completed import can keep its transactions without the file.");
+        if (row.file_deleted_at) return;
+        await removeStoredFile(row);
+        await imports.update(userId, id, { file_deleted_at: new Date().toISOString() });
+      } else {
+        await removeAll(row);
+      }
+      await audit(db, { userId, action: AUDIT_ACTIONS.IMPORT_DELETED, entityType: "import", entityId: id, metadata: { mode } });
     },
   };
 }

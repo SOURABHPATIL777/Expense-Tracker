@@ -65,6 +65,10 @@ export const IMPORT_STATUSES = [
 ] as const;
 export type ImportStatus = (typeof IMPORT_STATUSES)[number];
 
+/** Deleting an import: everything it brought in, or only the stored statement file. */
+export const IMPORT_DELETE_MODES = ["all", "file"] as const;
+export type ImportDeleteMode = (typeof IMPORT_DELETE_MODES)[number];
+
 /** Lifecycle of a statement file in object storage (R2). */
 export const FILE_STATUSES = ["uploaded", "processing", "deleted"] as const;
 export type FileStatus = (typeof FILE_STATUSES)[number];

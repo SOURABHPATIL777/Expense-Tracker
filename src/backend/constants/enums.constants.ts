@@ -16,6 +16,7 @@ export type AuthMode = (typeof AUTH_MODES)[keyof typeof AUTH_MODES];
 export const AUDIT_ACTIONS = {
   IMPORT_CREATED: "import.created",
   IMPORT_DELETED: "import.deleted",
+  IMPORT_REPLACED: "import.replaced",
   TRANSACTION_UPDATED: "transaction.updated",
   LLM_CONFIG_UPDATED: "llm_config.updated",
   SPLIT_CREATED: "split.created",

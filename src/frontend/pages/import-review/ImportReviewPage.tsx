@@ -16,11 +16,10 @@ import { Form } from "@/frontend/components/Form/Form";
 import { FormField } from "@/frontend/components/Form/FormField";
 import { Select } from "@/frontend/components/Select/Select";
 import { Skeleton } from "@/frontend/components/Skeleton/Skeleton";
-import { ConfirmDialog } from "@/frontend/components/ConfirmDialog/ConfirmDialog";
+import { DeleteImportDialog } from "@/frontend/components/DeleteImportDialog/DeleteImportDialog";
 import { useApi } from "@/frontend/hooks/useApi";
 import { usePaginatedList } from "@/frontend/hooks/usePaginatedList";
 import { usePolling } from "@/frontend/hooks/usePolling";
-import { useMutation } from "@/frontend/hooks/useMutation";
 import { api } from "@/frontend/lib/apiClient";
 import { formatDate } from "@/frontend/lib/format";
 import { API_ROUTES, PAGE_ROUTES } from "@/shared/constants/routes";
@@ -74,11 +73,6 @@ export default function ImportReviewPage() {
   usePolling(imp.reload, inProgress);
   usePolling(rows.reload, inProgress, 4000);
 
-  const remove = useMutation(() => api.del(API_ROUTES.import(id)), {
-    successMessage: "Import deleted",
-    onSuccess: () => router.replace(PAGE_ROUTES.imports),
-  });
-
   if (imp.error) return <Alert tone="danger">{imp.error.message}</Alert>;
   if (!imp.data) return <Skeleton lines={6} />;
   const d = imp.data;
@@ -99,7 +93,7 @@ export default function ImportReviewPage() {
         }
         actions={
           <Button variant="secondary" onClick={() => setConfirmDelete(true)}>
-            Delete import
+            Delete
           </Button>
         }
       />
@@ -111,7 +105,13 @@ export default function ImportReviewPage() {
           {d.readByAi && <Badge tone="warning">Read by AI, please check the rows</Badge>}
         </div>
 
-        {d.errorMessage && <Alert tone={d.status === "failed" ? "danger" : "warning"}>{d.errorMessage}</Alert>}
+        {d.errorMessage && (
+          <Alert tone={d.status === "failed" ? "danger" : "warning"}>
+            {d.errorMessage}
+            {d.status === "failed" && " You can upload the same file again; it will replace this import."}
+          </Alert>
+        )}
+        {d.fileDeletedAt && <Alert tone="info">The statement file was deleted; its transactions are kept.</Alert>}
         {stalled && (
           <Alert tone="warning" title="The file never finished uploading">
             Go back to <Link href={PAGE_ROUTES.imports}>Imports</Link> and upload the same file again; this import will be reused. If it keeps happening, the
@@ -156,15 +156,10 @@ export default function ImportReviewPage() {
         </Card>
       </div>
 
-      <ConfirmDialog
-        open={confirmDelete}
-        title="Delete this import?"
-        message="Transactions that came only from this file are deleted too. Transactions also found in another import are kept."
-        confirmLabel="Delete"
-        destructive
-        pending={remove.pending}
-        onConfirm={remove.run}
-        onCancel={() => setConfirmDelete(false)}
+      <DeleteImportDialog
+        imp={confirmDelete ? d : null}
+        onClose={() => setConfirmDelete(false)}
+        onDeleted={(mode) => (mode === "file" ? imp.reload() : router.replace(PAGE_ROUTES.imports))}
       />
     </>
   );

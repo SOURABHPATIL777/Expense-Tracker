@@ -1,7 +1,7 @@
 import "server-only";
 import * as XLSX from "xlsx";
 import { AppError } from "@/backend/errors/AppError";
-import { cleanCell } from "@/backend/import/text";
+import { cleanCell, looksLikeTransactionRow } from "@/backend/import/text";
 import type { TableRead } from "@/backend/import/types";
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -22,7 +22,23 @@ function cellText(cell: XLSX.CellObject | undefined): string {
   return cleanCell(cell.w ?? cell.v);
 }
 
-/** First sheet only; banks and Paytm put the statement on the first sheet. */
+function sheetRows(sheet: XLSX.WorkSheet | undefined): string[][] {
+  if (!sheet?.["!ref"]) return [];
+  const range = XLSX.utils.decode_range(sheet["!ref"]);
+  const rows: string[][] = [];
+  for (let r = range.s.r; r <= range.e.r; r++) {
+    const row: string[] = [];
+    for (let c = range.s.c; c <= range.e.c; c++) row.push(cellText(sheet[XLSX.utils.encode_cell({ r, c })] as XLSX.CellObject | undefined));
+    if (row.some(Boolean)) rows.push(row);
+  }
+  return rows;
+}
+
+/**
+ * The sheet holding the transactions: the one with the most date + amount rows. Exports often
+ * put a summary first (Paytm: "Summary", then "Passbook Payment History"). Falls back to the
+ * first non-empty sheet.
+ */
 export function readXlsx(buffer: Buffer): TableRead {
   let workbook: XLSX.WorkBook;
   try {
@@ -34,14 +50,12 @@ export function readXlsx(buffer: Buffer): TableRead {
     }
     throw new AppError("IMPORT_UNREADABLE", { cause: err });
   }
-  const sheet = workbook.Sheets[workbook.SheetNames[0]];
-  if (!sheet?.["!ref"]) return { kind: "table", rows: [] };
-  const range = XLSX.utils.decode_range(sheet["!ref"]);
-  const rows: string[][] = [];
-  for (let r = range.s.r; r <= range.e.r; r++) {
-    const row: string[] = [];
-    for (let c = range.s.c; c <= range.e.c; c++) row.push(cellText(sheet[XLSX.utils.encode_cell({ r, c })] as XLSX.CellObject | undefined));
-    if (row.some(Boolean)) rows.push(row);
+  const sheets = workbook.SheetNames.map((name) => sheetRows(workbook.Sheets[name])).filter((rows) => rows.length > 0);
+  let best = sheets[0] ?? [];
+  let bestScore = 0;
+  for (const rows of sheets) {
+    const score = rows.filter(looksLikeTransactionRow).length;
+    if (score > bestScore) [best, bestScore] = [rows, score];
   }
-  return { kind: "table", rows };
+  return { kind: "table", rows: best };
 }

@@ -35,12 +35,12 @@ describe("import_layouts", () => {
 
 describe("imports", () => {
   it("accepts an upload before its source is detected", async () => {
-    const { rows } = await t.db.query<{ source_app: string | null; read_by_ai: boolean }>(
+    const { rows } = await t.db.query<{ source_app: string | null; read_by_ai: boolean; file_deleted_at: string | null }>(
       `insert into public.imports (user_id, file_name, file_path, file_size, file_sha256)
-       values ($1, 'statement.pdf', $2, 10, $3) returning source_app, read_by_ai`,
+       values ($1, 'statement.pdf', $2, 10, $3) returning source_app, read_by_ai, file_deleted_at`,
       [alice, `${alice}/x/statement.pdf`, "b".repeat(64)],
     );
-    expect(rows[0]).toEqual({ source_app: null, read_by_ai: false });
+    expect(rows[0]).toEqual({ source_app: null, read_by_ai: false, file_deleted_at: null });
   });
 });
 

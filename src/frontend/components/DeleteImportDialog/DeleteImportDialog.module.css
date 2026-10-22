@@ -1,0 +1,28 @@
+.choices {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.choices li {
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.choices strong {
+  color: var(--color-text);
+}
+
+.choices .recommended {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+
+button.dangerText {
+  color: var(--color-danger);
+}

@@ -5,7 +5,7 @@ import { RATE_LIMITS } from "@/backend/constants/security.constants";
 import { importsService } from "@/backend/services/imports.service";
 import { readIdempotencyKey, withIdempotency } from "@/backend/services/idempotency";
 import { idParamsSchema, paginationQuerySchema } from "@/shared/schemas/common";
-import { createImportSchema, passwordSchema, rowsQuerySchema } from "@/shared/schemas/imports";
+import { createImportSchema, deleteImportQuerySchema, passwordSchema, rowsQuerySchema } from "@/shared/schemas/imports";
 
 const USER = AUTH_MODES.USER;
 const byId = { auth: USER, params: idParamsSchema } as const;
@@ -38,8 +38,8 @@ export const importsController = {
     return paged(items, meta);
   }),
 
-  remove: withHandler(byId, async ({ db, log, auth, params }) => {
-    await importsService(db, log).remove(auth.userId, params.id);
+  remove: withHandler({ ...byId, query: deleteImportQuerySchema }, async ({ db, log, auth, params, query }) => {
+    await importsService(db, log).remove(auth.userId, params.id, query.mode);
     return noContent();
   }),
 };
