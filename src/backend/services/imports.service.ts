@@ -15,7 +15,8 @@ import { enqueueJob } from "@/backend/jobs/queue";
 import { kickWorker } from "@/backend/jobs/worker";
 import { pageMeta } from "./paginate";
 import { audit } from "./auditLog";
-import { statementPath, statementStorage } from "./storage";
+import { statementBucket, statementKey, statementStorage } from "./storage";
+import { UploadedFilesRepository } from "@/backend/repositories/uploadedFiles.repository";
 import { importPipeline } from "./importPipeline.service";
 import { SOURCE_CONFIG } from "@/shared/constants/sources";
 import type { PaginationQuery } from "@/shared/schemas/common";
@@ -29,6 +30,7 @@ export function importsService(db: Db, log: Logger) {
   const imports = new ImportsRepository(db);
   const templates = new ImportTemplatesRepository(db);
   const rawEvents = new RawEventsRepository(db);
+  const files = new UploadedFilesRepository();
 
   /** Jobs are service-role only, so enqueueing uses the admin client; the worker starts right after the response. */
   async function queueExtract(userId: string, importId: string, stage: "extract" | "process" = "extract") {
@@ -38,7 +40,7 @@ export function importsService(db: Db, log: Logger) {
 
   async function readTable(userId: string, importId: string) {
     const row = await imports.findById(userId, importId);
-    const buffer = await statementStorage.download(db, row.file_path);
+    const buffer = await statementStorage.download(row.file_path);
     const read = await readFile(readerFor(detectFormat(row.file_name, buffer)), buffer);
     if (read.kind !== "table") throw invalidState("Column mapping is only available for CSV and Excel files.");
     return { row, rows: read.rows };
@@ -70,20 +72,31 @@ export function importsService(db: Db, log: Logger) {
             source_kind: SOURCE_CONFIG[input.sourceApp].kind,
             source_app: input.sourceApp,
             file_name: input.fileName,
-            file_path: statementPath(userId, id, input.fileName),
+            file_path: statementKey(userId, id, input.fileName),
             file_size: input.fileSize,
             file_sha256: input.sha256,
             status: "uploaded",
           });
         })());
       await audit(db, { userId, action: AUDIT_ACTIONS.IMPORT_CREATED, entityType: "import", entityId: row.id, metadata: { sourceApp: row.source_app } });
-      return { import: toImportDto(row), upload: { url: await statementStorage.createUploadUrl(db, row.file_path) } };
+      return { import: toImportDto(row), upload: { url: await statementStorage.createUploadUrl(row.file_path) } };
     },
 
     async markUploaded(userId: string, id: string): Promise<ImportDto> {
       const row = await imports.findById(userId, id);
       if (row.status !== "uploaded") return toImportDto(row);
-      if (!(await statementStorage.exists(db, row.file_path))) throw invalidState("The file hasn't finished uploading yet.");
+      const stored = await statementStorage.head(row.file_path);
+      if (!stored) throw invalidState("The file hasn't finished uploading yet.");
+      if (stored.sizeBytes !== row.file_size) throw invalidState("The uploaded file is incomplete. Please upload it again.");
+      await files.record(userId, {
+        import_id: id,
+        file_name: row.file_name,
+        file_key: row.file_path,
+        bucket: statementBucket(),
+        content_type: stored.contentType,
+        size_bytes: stored.sizeBytes,
+        sha256: row.file_sha256,
+      });
       const updated = await imports.update(userId, id, { status: "queued" });
       await queueExtract(userId, id);
       return toImportDto(updated);
@@ -141,7 +154,8 @@ export function importsService(db: Db, log: Logger) {
     async remove(userId: string, id: string): Promise<void> {
       const row = await imports.findById(userId, id);
       await imports.deleteCascade(id);
-      await statementStorage.remove(db, row.file_path);
+      await statementStorage.remove(row.file_path);
+      await files.setStatus(userId, row.file_path, "deleted");
       await audit(db, { userId, action: AUDIT_ACTIONS.IMPORT_DELETED, entityType: "import", entityId: id });
     },
   };

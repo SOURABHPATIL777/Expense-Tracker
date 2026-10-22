@@ -22,6 +22,7 @@ import { matchIncoming, type MatchCandidate } from "@/backend/domain/matcher";
 import { inferKind, paymentRail } from "@/backend/domain/inferKind";
 import { displayMerchant } from "@/backend/domain/merchant";
 import { statementStorage } from "./storage";
+import { UploadedFilesRepository } from "@/backend/repositories/uploadedFiles.repository";
 
 /** Statuses from which the extract stage may (re)run. */
 const EXTRACTABLE = new Set<ImportStatus>(["queued", "parsing", "needs_password"]);
@@ -43,9 +44,10 @@ export function importPipeline(db: Db, log: Logger) {
   const sources = new TransactionSourcesRepository(db);
   const reviews = new ReviewItemsRepository(db);
   const accounts = new AccountsRepository(db);
+  const files = new UploadedFilesRepository();
 
   async function loadFile(row: ImportRow): Promise<{ buffer: Buffer; reader: ReaderId }> {
-    const buffer = await statementStorage.download(db, row.file_path);
+    const buffer = await statementStorage.download(row.file_path);
     if (sha256Hex(buffer) !== row.file_sha256) {
       throw new AppError("IMPORT_UNREADABLE", { message: "The uploaded file doesn't match what was registered. Please upload it again." });
     }
@@ -64,13 +66,18 @@ export function importPipeline(db: Db, log: Logger) {
     return preset ? { config: preset, templateId: null } : null;
   }
 
-  const setStatus = (row: ImportRow, status: ImportStatus, message: string | null = null, code: string | null = null) =>
-    imports.update(row.user_id, row.id, { status, error_message: message, error_code: code }).then(() => status);
+  /** Any status other than `processing` means the file is back at rest in R2, waiting for the user. */
+  const setStatus = async (row: ImportRow, status: ImportStatus, message: string | null = null, code: string | null = null) => {
+    await imports.update(row.user_id, row.id, { status, error_message: message, error_code: code });
+    if (status !== "processing") await files.setStatus(row.user_id, row.file_path, "uploaded");
+    return status;
+  };
 
   async function extractStage(userId: string, importId: string, opts: { password?: string } = {}): Promise<ImportStatus> {
     let row = await imports.findById(userId, importId);
     if (!EXTRACTABLE.has(row.status)) return row.status;
     row = await imports.update(userId, importId, { status: "parsing", error_code: null, error_message: null });
+    await files.setStatus(userId, row.file_path, "processing");
 
     try {
       const { buffer, reader } = await loadFile(row);
@@ -266,7 +273,8 @@ export function importPipeline(db: Db, log: Logger) {
 
     await imports.update(userId, importId, { status: "completed", completed_at: new Date().toISOString() });
     // Raw rows are kept as provenance; the original file is no longer needed.
-    await statementStorage.remove(db, row.file_path);
+    await statementStorage.remove(row.file_path);
+    await files.setStatus(userId, row.file_path, "deleted");
     log.info({ importId }, "import completed");
     return { done: true };
   }

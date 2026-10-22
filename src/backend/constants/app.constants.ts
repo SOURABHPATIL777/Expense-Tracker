@@ -16,8 +16,8 @@ export const TIMEOUTS_MS = {
 } as const;
 
 export const STORAGE = {
+  /** Presigned R2 PUT URLs expire after this long. */
   SIGNED_UPLOAD_TTL_SECONDS: 10 * 60,
-  SIGNED_DOWNLOAD_TTL_SECONDS: 60,
 } as const;
 
 export const JOBS = {

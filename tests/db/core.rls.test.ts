@@ -99,12 +99,47 @@ describe("service-only objects", () => {
   });
 });
 
-describe("storage policies", () => {
-  it("restricts statement files to the owner's folder", async () => {
-    const ok = await t.as(alice, (q) => q(`insert into storage.objects (bucket_id, name) values ('statements', $1) returning id`, [`${alice}/a.csv`]));
-    expect(ok.rows).toHaveLength(1);
-    await expect(
-      t.as(alice, (q) => q(`insert into storage.objects (bucket_id, name) values ('statements', $1)`, [`${bob}/evil.csv`])),
-    ).rejects.toThrow(/row-level security/);
+describe("uploaded_files ledger", () => {
+  const sha = "a".repeat(64);
+  async function insertImport(userId: string) {
+    const { rows } = await t.db.query<{ id: string }>(
+      `insert into public.imports (user_id, source_kind, source_app, file_name, file_path, file_size, file_sha256)
+       values ($1, 'upi_app', 'phonepe', 'statement.pdf', $2, 100, $3) returning id`,
+      [userId, `${userId}/x/statement.pdf`, crypto.randomUUID().replace(/-/g, "").padEnd(64, "0")],
+    );
+    return rows[0].id;
+  }
+  const record = (userId: string, importId: string | null, key: string) =>
+    t.db.query<{ id: string }>(
+      `insert into public.uploaded_files (user_id, import_id, file_name, file_key, bucket, size_bytes, sha256)
+       values ($1, $2, 'statement.pdf', $3, 'expense-statements', 100, $4) returning id`,
+      [userId, importId, key, sha],
+    );
+
+  it("lets owners read their file history but never write it", async () => {
+    const importId = await insertImport(alice);
+    await record(alice, importId, `${alice}/${importId}/statement.pdf`);
+    const own = await t.as(alice, (q) => q(`select status from public.uploaded_files where import_id = $1`, [importId]));
+    expect(own.rows).toEqual([{ status: "uploaded" }]);
+    const other = await t.as(bob, (q) => q(`select id from public.uploaded_files where import_id = $1`, [importId]));
+    expect(other.rows).toHaveLength(0);
+    await expect(t.as(alice, (q) => q(`update public.uploaded_files set status = 'deleted' where import_id = $1`, [importId]))).rejects.toThrow(
+      /permission denied/,
+    );
+  });
+
+  it("requires keys under the owner's prefix", async () => {
+    await expect(record(alice, null, `${bob}/x/evil.pdf`)).rejects.toThrow(/check constraint/);
+  });
+
+  it("requires deleted_at exactly when deleted, and survives import deletion", async () => {
+    const importId = await insertImport(bob);
+    const key = `${bob}/${importId}/statement.pdf`;
+    await record(bob, importId, key);
+    await expect(t.db.query(`update public.uploaded_files set status = 'deleted' where file_key = $1`, [key])).rejects.toThrow(/check constraint/);
+    await t.db.query(`update public.uploaded_files set status = 'deleted', deleted_at = now() where file_key = $1`, [key]);
+    await t.db.query(`delete from public.imports where id = $1`, [importId]);
+    const { rows } = await t.db.query(`select status, import_id from public.uploaded_files where file_key = $1`, [key]);
+    expect(rows).toEqual([{ status: "deleted", import_id: null }]);
   });
 });

@@ -1,6 +1,7 @@
 import "server-only";
 import type {
   CategorySource,
+  FileStatus,
   Direction,
   ImportStatus,
   LlmProvider,
@@ -83,6 +84,20 @@ export type ImportRow = Timestamps & {
 };
 
 export type RawEventStatus = "pending" | "accepted" | "linked" | "duplicate" | "skipped" | "rejected";
+
+export type UploadedFileRow = Timestamps & {
+  id: string;
+  user_id: string;
+  import_id: string | null;
+  file_name: string;
+  file_key: string;
+  bucket: string;
+  content_type: string | null;
+  size_bytes: number;
+  sha256: string;
+  status: FileStatus;
+  deleted_at: string | null;
+};
 
 export type TransactionSourceRow = {
   id: string;

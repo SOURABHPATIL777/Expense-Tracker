@@ -1,41 +1,77 @@
 import "server-only";
-import type { Db } from "@/backend/supabase/clients";
-import { BUCKETS } from "@/backend/constants/db.constants";
+import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client, S3ServiceException } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { getEnv } from "@/backend/config/env";
+import { STORAGE } from "@/backend/constants/app.constants";
 import { AppError } from "@/backend/errors/AppError";
-import { logger } from "@/backend/logger/logger";
 
-const bucket = (db: Db) => db.storage.from(BUCKETS.STATEMENTS);
+let client: S3Client | undefined;
 
-/** Files live under `<user_id>/<import_id>/<name>` so storage RLS can scope by folder. */
-export function statementPath(userId: string, importId: string, fileName: string): string {
+/** Cloudflare R2 through its S3-compatible API. Credentials stay server-side. */
+function r2(): S3Client {
+  if (client) return client;
+  const env = getEnv();
+  client = new S3Client({
+    region: "auto",
+    endpoint: env.R2_ENDPOINT ?? `https://${env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+    credentials: { accessKeyId: env.R2_ACCESS_KEY_ID, secretAccessKey: env.R2_SECRET_ACCESS_KEY },
+  });
+  return client;
+}
+
+export const statementBucket = () => getEnv().R2_BUCKET;
+
+/** Object key: `<user_id>/<import_id>/<safe name>`. The user prefix lets the ledger enforce ownership. */
+export function statementKey(userId: string, importId: string, fileName: string): string {
   const safe = fileName.replace(/[^\w.-]+/g, "_").slice(-120);
   return `${userId}/${importId}/${safe}`;
 }
 
+const isNotFound = (err: unknown) =>
+  err instanceof S3ServiceException && (err.$metadata.httpStatusCode === 404 || err.name === "NotFound" || err.name === "NoSuchKey");
+
+const upstream = (err: unknown, message?: string) => new AppError("UPSTREAM", { internal: err, message });
+
 export const statementStorage = {
-  /** Browser uploads straight to Supabase Storage (avoids the 4.5 MB serverless body limit). */
-  async createUploadUrl(db: Db, path: string): Promise<string> {
-    // upsert: a retried upload for the same pending import overwrites the half-uploaded object.
-    const { data, error } = await bucket(db).createSignedUploadUrl(path, { upsert: true });
-    if (error || !data) throw new AppError("UPSTREAM", { internal: error });
-    return data.signedUrl;
+  /** Presigned PUT so the browser uploads straight to R2 (bypasses the serverless body limit). */
+  async createUploadUrl(key: string): Promise<string> {
+    try {
+      return await getSignedUrl(r2(), new PutObjectCommand({ Bucket: statementBucket(), Key: key }), {
+        expiresIn: STORAGE.SIGNED_UPLOAD_TTL_SECONDS,
+      });
+    } catch (err) {
+      throw upstream(err);
+    }
   },
 
-  async exists(db: Db, path: string): Promise<boolean> {
-    const { data, error } = await bucket(db).exists(path);
-    if (error && data !== false) throw new AppError("UPSTREAM", { internal: error });
-    return data;
+  /** Size and content type of the stored object, or null if it isn't there (yet). */
+  async head(key: string): Promise<{ sizeBytes: number; contentType: string | null } | null> {
+    try {
+      const res = await r2().send(new HeadObjectCommand({ Bucket: statementBucket(), Key: key }));
+      return { sizeBytes: res.ContentLength ?? 0, contentType: res.ContentType ?? null };
+    } catch (err) {
+      if (isNotFound(err)) return null;
+      throw upstream(err);
+    }
   },
 
-  async download(db: Db, path: string): Promise<Buffer> {
-    const { data, error } = await bucket(db).download(path);
-    if (error || !data) throw new AppError("UPSTREAM", { internal: error, message: "The uploaded file could not be read." });
-    return Buffer.from(await data.arrayBuffer());
+  async download(key: string): Promise<Buffer> {
+    try {
+      const res = await r2().send(new GetObjectCommand({ Bucket: statementBucket(), Key: key }));
+      if (!res.Body) throw new Error("empty body");
+      return Buffer.from(await res.Body.transformToByteArray());
+    } catch (err) {
+      if (isNotFound(err)) throw new AppError("NOT_FOUND", { message: "The uploaded file is no longer available. Upload it again." });
+      throw upstream(err, "The uploaded file could not be read.");
+    }
   },
 
-  /** Best effort: a leftover file is a privacy issue to log, not a reason to fail the request. */
-  async remove(db: Db, path: string): Promise<void> {
-    const { error } = await bucket(db).remove([path]);
-    if (error) logger.error({ err: error }, "statement file removal failed");
+  /** Idempotent: deleting a missing object succeeds. */
+  async remove(key: string): Promise<void> {
+    try {
+      await r2().send(new DeleteObjectCommand({ Bucket: statementBucket(), Key: key }));
+    } catch (err) {
+      throw upstream(err);
+    }
   },
 };

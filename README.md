@@ -36,6 +36,35 @@ npm run dev
 
 Node 20.9+ is required; Node 22+ is recommended (supabase-js is deprecating Node 20).
 
+## File storage (Cloudflare R2)
+
+Statements are uploaded **directly from the browser to the private R2 bucket** `expense-statements` using
+a presigned PUT URL (valid 10 minutes). Credentials never reach the browser. Object keys are
+`<user_id>/<import_id>/<file name>`.
+
+Every object is tracked in the `uploaded_files` table (`user_id`, `file_name`, `file_key`, `status`):
+
+| Status | Meaning |
+| --- | --- |
+| `uploaded` | Upload confirmed (size checked) and the file is at rest, waiting for processing, a password or a column mapping |
+| `processing` | The import job is reading it |
+| `deleted` | Removed from R2 (after a successful import or when the import is deleted); the row is kept as a record |
+
+**One-time bucket setup:** R2 → `expense-statements` → Settings → CORS policy:
+
+```json
+[
+  {
+    "AllowedOrigins": ["http://localhost:3000", "https://<your-vercel-domain>"],
+    "AllowedMethods": ["PUT"],
+    "AllowedHeaders": ["content-type"],
+    "MaxAgeSeconds": 3600
+  }
+]
+```
+
+Keep the bucket private (no public r2.dev access and no custom public domain).
+
 ## Scripts
 
 | Script | Purpose |

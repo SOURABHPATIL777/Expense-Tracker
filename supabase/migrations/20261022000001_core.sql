@@ -11,6 +11,7 @@ create type public.transaction_status as enum ('success', 'pending', 'failed', '
 create type public.transaction_review_status as enum ('ok', 'needs_review');
 create type public.reconciliation_state as enum ('single_source', 'reconciled');
 create type public.source_kind as enum ('upi_app', 'bank');
+create type public.file_status as enum ('uploaded', 'processing', 'deleted');
 create type public.import_status as enum ('uploaded', 'queued', 'parsing', 'needs_mapping', 'needs_password', 'processing', 'completed', 'failed');
 create type public.raw_event_status as enum ('pending', 'accepted', 'linked', 'duplicate', 'skipped', 'rejected');
 create type public.review_item_kind as enum ('duplicate_candidate', 'low_confidence_category', 'transfer_confirmation', 'refund_match');
@@ -215,6 +216,30 @@ create table public.raw_events (
 );
 create index raw_events_user_fingerprint_idx on public.raw_events (user_id, fingerprint);
 create index raw_events_import_status_idx on public.raw_events (import_id, status);
+
+-- Ledger of statement files stored in Cloudflare R2 (bucket set by R2_BUCKET). One row per object;
+-- the row outlives the object (and the import) so deletions stay on record.
+create table public.uploaded_files (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+  import_id uuid references public.imports (id) on delete set null,
+  -- Original name as uploaded by the user.
+  file_name text not null check (char_length(file_name) between 1 and 255),
+  -- R2 object key (full path inside the bucket): <user_id>/<import_id>/<safe file name>.
+  file_key text not null unique check (file_key like user_id::text || '/%'),
+  bucket text not null,
+  content_type text,
+  size_bytes integer not null check (size_bytes > 0),
+  sha256 text not null check (sha256 ~ '^[0-9a-f]{64}$'),
+  status public.file_status not null default 'uploaded',
+  deleted_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  check ((status = 'deleted') = (deleted_at is not null))
+);
+create index uploaded_files_user_idx on public.uploaded_files (user_id, created_at desc);
+create index uploaded_files_import_idx on public.uploaded_files (import_id);
+create index uploaded_files_live_idx on public.uploaded_files (status, updated_at) where status <> 'deleted';
 
 -- ---------------------------------------------------------------------------
 -- Transactions
@@ -513,7 +538,7 @@ declare
 begin
   foreach t in array array[
     'profiles', 'financial_accounts', 'categories', 'import_templates', 'imports', 'transactions',
-    'categorization_rules', 'merchant_map', 'refund_expectations', 'llm_configs'
+    'categorization_rules', 'merchant_map', 'refund_expectations', 'llm_configs', 'uploaded_files'
   ] loop
     execute format('create trigger set_updated_at before update on public.%I for each row execute function public.set_updated_at()', t);
   end loop;
@@ -564,60 +589,16 @@ create policy audit_events_owner_insert on public.audit_events
   for insert to authenticated
   with check (user_id = (select auth.uid()));
 
+-- File history: owners read, only the server (service role) writes.
+alter table public.uploaded_files enable row level security;
+create policy uploaded_files_owner_read on public.uploaded_files
+  for select to authenticated
+  using (user_id = (select auth.uid()) and (select public.is_permanent_user()));
+revoke insert, update, delete on public.uploaded_files from authenticated;
+
 -- Service role only.
 alter table public.jobs enable row level security;
 alter table public.rate_limits enable row level security;
 
 -- The anon key never needs table access: every request is authenticated or goes through the server.
 revoke all on all tables in schema public from anon;
-
--- ---------------------------------------------------------------------------
--- Storage: private statements bucket, files under <user_id>/...
--- ---------------------------------------------------------------------------
-insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-values (
-  'statements', 'statements', false, 10485760,
-  -- Mirrors FILE_FORMATS in src/shared/constants/sources.ts (CSV, Excel, PDF).
-  array[
-    'text/csv', 'application/csv', 'text/plain', 'application/vnd.ms-excel',
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/pdf', 'application/octet-stream'
-  ]
-)
-on conflict (id) do nothing;
-
-create policy statements_owner_insert on storage.objects
-  for insert to authenticated
-  with check (
-    bucket_id = 'statements'
-    and (storage.foldername(name))[1] = (select auth.uid())::text
-    and (select public.is_permanent_user())
-  );
-
-create policy statements_owner_select on storage.objects
-  for select to authenticated
-  using (
-    bucket_id = 'statements'
-    and (storage.foldername(name))[1] = (select auth.uid())::text
-    and (select public.is_permanent_user())
-  );
-
-create policy statements_owner_delete on storage.objects
-  for delete to authenticated
-  using (
-    bucket_id = 'statements'
-    and (storage.foldername(name))[1] = (select auth.uid())::text
-    and (select public.is_permanent_user())
-  );
-
--- Retried uploads overwrite the pending object (signed upload URL with upsert).
-create policy statements_owner_update on storage.objects
-  for update to authenticated
-  using (
-    bucket_id = 'statements'
-    and (storage.foldername(name))[1] = (select auth.uid())::text
-    and (select public.is_permanent_user())
-  )
-  with check (
-    bucket_id = 'statements'
-    and (storage.foldername(name))[1] = (select auth.uid())::text
-  );

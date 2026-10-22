@@ -24,6 +24,7 @@ export const TABLES = {
   PAYMENT_CLAIMS: "payment_claims",
   EXPENSE_EVENTS: "expense_events",
   IDEMPOTENCY_KEYS: "idempotency_keys",
+  UPLOADED_FILES: "uploaded_files",
 } as const;
 export type TableName = (typeof TABLES)[keyof typeof TABLES];
 
@@ -39,10 +40,6 @@ export const RPC = {
   OWNER_RESOLVE_CLAIM: "owner_resolve_claim",
   SAVE_SPLIT: "save_split",
   DELETE_IMPORT: "delete_import",
-} as const;
-
-export const BUCKETS = {
-  STATEMENTS: "statements",
 } as const;
 
 export const PG_ERROR = {

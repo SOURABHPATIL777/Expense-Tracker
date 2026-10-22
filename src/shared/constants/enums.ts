@@ -65,6 +65,10 @@ export const IMPORT_STATUSES = [
 ] as const;
 export type ImportStatus = (typeof IMPORT_STATUSES)[number];
 
+/** Lifecycle of a statement file in object storage (R2). */
+export const FILE_STATUSES = ["uploaded", "processing", "deleted"] as const;
+export type FileStatus = (typeof FILE_STATUSES)[number];
+
 export const REVIEW_ITEM_KINDS = [
   "duplicate_candidate",
   "low_confidence_category",

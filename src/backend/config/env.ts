@@ -35,6 +35,13 @@ const envSchema = z.object({
   SUPABASE_PUBLISHABLE_KEY: z.string().min(20),
   SUPABASE_SECRET_KEY: z.string().min(20),
   CRON_SECRET: z.string().min(32, "CRON_SECRET must be at least 32 characters"),
+  // Cloudflare R2 (S3-compatible) holds uploaded statements.
+  R2_ACCOUNT_ID: z.string().regex(/^[0-9a-f]{32}$/, "R2_ACCOUNT_ID is the 32-character Cloudflare account ID"),
+  R2_ACCESS_KEY_ID: z.string().min(16),
+  R2_SECRET_ACCESS_KEY: z.string().min(32),
+  R2_BUCKET: z.string().min(3).default("expense-statements"),
+  /** Override for EU/FedRAMP jurisdictions, e.g. https://<account>.eu.r2.cloudflarestorage.com */
+  R2_ENDPOINT: optionalSecret.pipe(z.url().optional()),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
   OPENAI_API_KEY: optionalSecret,
   GOOGLE_GENERATIVE_AI_API_KEY: optionalSecret,
