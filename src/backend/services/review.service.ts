@@ -4,7 +4,7 @@ import { invalidState, unwrapMaybe } from "@/backend/errors/AppError";
 import { RPC } from "@/backend/constants/db.constants";
 import { ReviewItemsRepository } from "@/backend/repositories/reviewItems.repository";
 import { TransactionsRepository } from "@/backend/repositories/transactions.repository";
-import { toReviewItemDto } from "@/backend/mappers/categorization.mapper";
+import { toReviewItemDto } from "@/backend/mappers/transactions.mapper";
 import { pageMeta } from "./paginate";
 import { recategorize } from "./categorization.service";
 import type { PaginationQuery } from "@/shared/schemas/common";

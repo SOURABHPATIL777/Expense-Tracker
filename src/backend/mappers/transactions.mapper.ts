@@ -1,8 +1,10 @@
 import "server-only";
-import type { CategoryRow, LlmConfigRow, ReviewItemRow, RuleRow, TransactionRow } from "@/backend/repositories/types";
+import type { CategoryRow, LlmConfigRow, RefundRow, ReviewItemRow, RuleRow, TransactionRow } from "@/backend/repositories/types";
 import type { CategoryDto, CategoryInput, RuleDto, RuleInput } from "@/shared/schemas/categories";
 import type { LlmConfigDto, LlmTestResultDto } from "@/shared/schemas/llm";
 import type { ReviewItemDto, TransactionSummaryDto } from "@/shared/schemas/review";
+import type { TransactionDto } from "@/shared/schemas/transactions";
+import type { RefundDto } from "@/shared/schemas/refunds";
 
 export const toCategoryDto = (r: CategoryRow): CategoryDto => ({ id: r.id, name: r.name, kindHint: r.kind_hint, color: r.color, isSystem: r.is_system });
 
@@ -64,3 +66,36 @@ export const toReviewItemDto = (r: ReviewItemRow, txById: Map<string, Transactio
   const tx = (id: string | null) => (id && txById.has(id) ? toTransactionSummary(txById.get(id)!) : null);
   return { id: r.id, kind: r.kind, createdAt: r.created_at, transaction: tx(r.transaction_id), related: tx(r.related_transaction_id), payload: r.payload };
 };
+
+export const toTransactionDto = (t: TransactionRow): TransactionDto => ({
+  ...toTransactionSummary(t),
+  narration: t.narration,
+  note: t.note,
+  counterpartyVpa: t.counterparty_vpa,
+  appTransactionId: t.app_transaction_id,
+  paymentRail: t.payment_rail,
+  categorySource: t.category_source,
+  categoryConfidence: t.category_confidence === null ? null : Number(t.category_confidence),
+  userLocked: t.user_locked,
+  personalShareMinor: t.personal_share_minor,
+  reconciliation: t.reconciliation,
+  reviewStatus: t.review_status,
+});
+
+export function toRefundDto(r: RefundRow, txById: Map<string, TransactionRow>, today: string): RefundDto {
+  const tx = (id: string | null) => (id && txById.has(id) ? toTransactionSummary(txById.get(id)!) : null);
+  const waiting = r.status === "open" || r.status === "suggested";
+  return {
+    id: r.id,
+    status: r.status,
+    expectedAmountMinor: r.expected_amount_minor,
+    expectedBy: r.expected_by,
+    overdue: waiting && Boolean(r.expected_by && r.expected_by < today),
+    orderRef: r.order_ref,
+    note: r.note,
+    createdAt: r.created_at,
+    transaction: tx(r.transaction_id),
+    match: tx(r.matched_transaction_id),
+    suggestions: waiting ? r.suggested_transaction_ids.flatMap((id) => tx(id) ?? []) : [],
+  };
+}

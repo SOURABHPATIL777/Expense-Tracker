@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { getAdminClient, type Db } from "@/backend/supabase/clients";
 import { CategoriesRepository, MerchantMapRepository, RulesRepository } from "@/backend/repositories/categorization.repository";
 import { TransactionsRepository } from "@/backend/repositories/transactions.repository";
-import { toCategoryDto, toCategoryRow, toRuleDto, toRuleRow } from "@/backend/mappers/categorization.mapper";
+import { toCategoryDto, toCategoryRow, toRuleDto, toRuleRow } from "@/backend/mappers/transactions.mapper";
 import { merchantKey } from "@/backend/domain/merchant";
 import { enqueueJob } from "@/backend/jobs/queue";
 import { kickWorker } from "@/backend/jobs/worker";

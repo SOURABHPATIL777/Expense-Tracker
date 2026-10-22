@@ -573,6 +573,55 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
+-- Reports. All money totals are computed here, never by the UI or an LLM.
+-- Only successful transactions count; personal spending uses the user's own share.
+-- ---------------------------------------------------------------------------
+create or replace function public.report_overview(p_from timestamptz, p_to timestamptz)
+returns jsonb
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  with t as (
+    select * from public.transactions
+     where user_id = auth.uid() and occurred_at >= p_from and occurred_at < p_to
+  ), ok as (
+    select * from t where status = 'success'
+  )
+  select jsonb_build_object(
+    'cash_outflow', coalesce((select sum(amount_minor) from ok where direction = 'debit'), 0),
+    'personal_expense', coalesce((select sum(coalesce(personal_share_minor, amount_minor)) from ok where direction = 'debit' and transaction_kind = 'expense'), 0),
+    'others_share', coalesce((select sum(amount_minor - coalesce(personal_share_minor, amount_minor)) from ok where direction = 'debit' and transaction_kind = 'expense'), 0)
+                  + coalesce((select sum(amount_minor) from ok where direction = 'debit' and transaction_kind = 'reimbursable'), 0),
+    'own_transfers', coalesce((select sum(amount_minor) from ok where direction = 'debit' and transaction_kind in ('self_transfer', 'cc_bill_payment')), 0),
+    'unclassified_outflow', coalesce((select sum(amount_minor) from ok where direction = 'debit' and transaction_kind = 'unknown'), 0),
+    'income', coalesce((select sum(amount_minor) from ok where direction = 'credit' and transaction_kind = 'income'), 0),
+    'refunds_received', coalesce((select sum(amount_minor) from ok where direction = 'credit' and transaction_kind in ('refund', 'reversal')), 0),
+    'unclassified_inflow', coalesce((select sum(amount_minor) from ok where direction = 'credit' and transaction_kind = 'unknown'), 0),
+    'uncategorized_count', (select count(*) from ok where direction = 'debit' and transaction_kind = 'expense' and category_id is null),
+    'failed_or_pending_count', (select count(*) from t where status in ('failed', 'pending')),
+    'transaction_count', (select count(*) from t)
+  )
+$$;
+
+create or replace function public.report_category_breakdown(p_from timestamptz, p_to timestamptz)
+returns table (category_id uuid, total_minor bigint, tx_count bigint)
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  select t.category_id, sum(coalesce(t.personal_share_minor, t.amount_minor))::bigint, count(*)
+    from public.transactions t
+   where t.user_id = auth.uid()
+     and t.occurred_at >= p_from and t.occurred_at < p_to
+     and t.status = 'success' and t.direction = 'debit' and t.transaction_kind = 'expense'
+   group by t.category_id
+   order by 2 desc
+$$;
+
+-- ---------------------------------------------------------------------------
 -- updated_at triggers
 -- ---------------------------------------------------------------------------
 do $$

@@ -4,6 +4,7 @@ import { categorizeData, categorizeSchema } from "@/backend/llm/prompts/categori
 import { isCloudModel } from "@/backend/llm/registry";
 import { llmConfigInputSchema } from "@/shared/schemas/llm";
 import { ruleFormSchema } from "@/shared/schemas/categories";
+import { istDateRange } from "@/backend/domain/period";
 
 const rule = (over: Partial<Rule>): Rule => ({
   id: crypto.randomUUID(),
@@ -76,5 +77,12 @@ describe("rule form", () => {
     const base = { field: "merchant", operator: "contains", pattern: "rent", categoryId: "", transactionKind: "", priority: "100", isActive: "true" };
     expect(ruleFormSchema.safeParse(base).success).toBe(false);
     expect(ruleFormSchema.safeParse({ ...base, transactionKind: "self_transfer" }).success).toBe(true);
+  });
+});
+
+
+describe("istDateRange", () => {
+  it("turns inclusive IST dates into a half-open UTC range", () => {
+    expect(istDateRange("2024-10-01", "2024-10-31")).toEqual({ fromIso: "2024-09-30T18:30:00.000Z", toIso: "2024-10-31T18:30:00.000Z" });
   });
 });

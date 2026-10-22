@@ -5,7 +5,7 @@ import { getEnv } from "@/backend/config/env";
 import { LLM_PROVIDERS, LLM_TASKS } from "@/backend/constants/enums.constants";
 import { DEFAULT_MODELS, SUGGESTED_MODELS, TASK_DEFAULTS } from "@/backend/constants/llm.constants";
 import { LlmConfigsRepository } from "@/backend/repositories/llm.repository";
-import { toLlmConfigDto } from "@/backend/mappers/categorization.mapper";
+import { toLlmConfigDto } from "@/backend/mappers/transactions.mapper";
 import { isCloudModel, providerAvailable } from "@/backend/llm/registry";
 import { testModel } from "@/backend/llm/capabilities";
 import { audit } from "./auditLog";

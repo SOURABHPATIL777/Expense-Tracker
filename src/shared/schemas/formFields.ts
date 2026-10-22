@@ -31,18 +31,22 @@ export const listField = <S extends StringInput>(item: S, max = 20) =>
     )
     .pipe(z.array(item).max(max));
 
+const toPaise = (v: string, ctx: z.RefinementCtx) => {
+  const minor = parseAmountToMinor(v);
+  if (minor === null || minor <= 0) {
+    ctx.addIssue({ code: "custom", message: "Enter a positive amount like 250 or 1,250.50" });
+    return z.NEVER;
+  }
+  return minor;
+};
+
 /** Rupee amount typed by a person ("1,250.50") → positive paise. */
-export const rupeesField = z
+export const rupeesField = z.string().trim().min(1, "Enter an amount").transform(toPaise);
+
+/** Same, but an empty box means "not given". */
+export const optionalRupeesField = z
   .string()
   .trim()
-  .min(1, "Enter an amount")
-  .transform((v, ctx) => {
-    const minor = parseAmountToMinor(v);
-    if (minor === null || minor <= 0) {
-      ctx.addIssue({ code: "custom", message: "Enter a positive amount like 250 or 1,250.50" });
-      return z.NEVER;
-    }
-    return minor;
-  });
+  .transform((v, ctx) => (v === "" ? undefined : toPaise(v, ctx)));
 
 export const numberField = z.coerce.number();

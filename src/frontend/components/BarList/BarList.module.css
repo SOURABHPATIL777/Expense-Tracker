@@ -1,0 +1,82 @@
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: minmax(7rem, 11rem) 1fr auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  cursor: default;
+}
+
+/* The whole row is the hit target, larger than the 10px mark. */
+.row:hover,
+.row:focus-visible {
+  background: var(--color-surface-muted);
+}
+
+.row:hover .bar,
+.row:focus-visible .bar {
+  filter: brightness(1.12);
+}
+
+.label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  font-size: var(--text-sm);
+}
+
+.dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.track {
+  display: block;
+  min-width: 0;
+}
+
+/* Thin mark, square at the baseline, 4px rounded data-end. */
+.bar {
+  display: block;
+  height: 10px;
+  border-radius: 0 4px 4px 0;
+  background: var(--color-accent);
+}
+
+.value {
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+@media (max-width: 560px) {
+  .row {
+    grid-template-columns: 1fr auto;
+  }
+
+  .track {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
