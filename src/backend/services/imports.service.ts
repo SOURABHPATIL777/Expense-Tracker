@@ -32,7 +32,6 @@ export const replaceable = (row: Pick<ImportRow, "status" | "updated_at">, now =
 
 /** Why the same file can't be uploaded again, by the existing import's status. */
 const DUPLICATE_MESSAGES: Partial<Record<ImportStatus, string>> = {
-  completed: "You've already imported this exact file.",
   needs_password: "This file is waiting for its password. Open it from Imports to unlock it.",
 };
 const IN_PROGRESS_MESSAGE = "This file is already being imported.";
@@ -89,6 +88,11 @@ export function importsService(db: Db, log: Logger) {
         await audit(db, { userId, action: AUDIT_ACTIONS.IMPORT_REPLACED, entityType: "import", entityId: existing.id, metadata: { fileName: existing.file_name } });
         existing = null;
       }
+      // The same statement again: it is read once more and its transactions corrected (no new import).
+      if (existing?.status === "completed") {
+        await audit(db, { userId, action: AUDIT_ACTIONS.IMPORT_REREAD, entityType: "import", entityId: existing.id, metadata: { fileName: existing.file_name } });
+        return { import: toImportDto(existing), upload: { url: await statementStorage.createUploadUrl(existing.file_path) } };
+      }
       if (existing && existing.status !== "uploaded") {
         throw new AppError("CONFLICT", { message: DUPLICATE_MESSAGES[existing.status] ?? IN_PROGRESS_MESSAGE, details: { importId: existing.id } });
       }
@@ -112,10 +116,19 @@ export function importsService(db: Db, log: Logger) {
 
     async markUploaded(userId: string, id: string): Promise<ImportDto> {
       const row = await imports.findById(userId, id);
-      if (row.status !== "uploaded") return toImportDto(row);
+      if (row.status !== "uploaded" && row.status !== "completed") return toImportDto(row);
       const stored = await statementStorage.head(row.file_path);
-      if (!stored) throw invalidState("The file hasn't finished uploading yet.");
+      if (!stored) {
+        // A completed import's file is removed once read, so nothing stored means no new upload.
+        if (row.status === "completed") return toImportDto(row);
+        throw invalidState("The file hasn't finished uploading yet.");
+      }
       if (stored.sizeBytes !== row.file_size) throw invalidState("The uploaded file is incomplete. Please upload it again.");
+      if (row.status === "completed") {
+        await enqueueJob(getAdminClient(), { type: "reread_import", userId, payload: { importId: id, fromFile: true }, idempotencyKey: `reread:${id}:${randomUUID()}` });
+        kickWorker();
+        return toImportDto(row);
+      }
       await files.record(userId, {
         import_id: id,
         file_name: row.file_name,

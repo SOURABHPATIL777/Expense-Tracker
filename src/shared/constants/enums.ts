@@ -112,7 +112,7 @@ export type RefundStatus = (typeof REFUND_STATUSES)[number];
 export const LLM_TASKS = ["categorize", "column_mapping", "monthly_summary", "refund_message"] as const;
 export type LlmTask = (typeof LLM_TASKS)[number];
 
-export const JOB_TYPES = ["parse_import", "classify_transactions", "match_refunds"] as const;
+export const JOB_TYPES = ["parse_import", "classify_transactions", "match_refunds", "reread_import"] as const;
 export type JobType = (typeof JOB_TYPES)[number];
 
 export const JOB_STATUSES = ["queued", "running", "succeeded", "failed", "dead"] as const;

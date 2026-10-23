@@ -29,6 +29,8 @@ const CELL_GAP = 4;
 const HEADER_FOLLOW_GAP = 14;
 /** A line further than this many typical line gaps from every record is a footer, total or note. */
 const ATTACH_GAPS = 2.5;
+/** Lines closer than this many in-row gaps are one block (one row of the table). */
+const BLOCK_GAP_FACTOR = 1.2;
 const TIME_ONLY = /^\d{1,2}:\d{2}(:\d{2})?\s*([ap]\.?m\.?)?$/i;
 const DATE_COLUMN = /date/i;
 const AMOUNT_COLUMN = /debit|credit|withdraw|deposit|amount|balance|\bdr\b|\bcr\b/i;
@@ -108,6 +110,31 @@ const median = (values: number[]) => {
   return s[Math.floor(s.length / 2)];
 };
 
+/**
+ * Rows are usually spaced further apart than the lines inside a row (Axis: 9pt within, 13pt
+ * between). Lines closer than the in-row gap form a block; a block holding exactly one date line is
+ * that record, wherever the date sits in it (first, middle or last line). Lines in blocks with no
+ * date line or several (evenly spaced layouts) get no answer here and fall back to nearest-record.
+ */
+function recordsByBlock(placed: ReadonlyArray<{ isAnchor: boolean }>, gaps: readonly number[], recordAt: ReadonlyMap<number, Record>): Array<Record | undefined> {
+  const out: Array<Record | undefined> = placed.map(() => undefined);
+  if (gaps.length < 2) return out;
+  const sorted = [...gaps].sort((a, b) => a - b);
+  const inRow = sorted[Math.floor(sorted.length / 4)];
+  const limit = inRow * BLOCK_GAP_FACTOR;
+  // Only meaningful when rows really are spaced wider than their lines.
+  if (!sorted.some((g) => g > limit)) return out;
+  let start = 0;
+  for (let i = 1; i <= placed.length; i++) {
+    if (i < placed.length && gaps[i - 1] <= limit) continue;
+    const members = Array.from({ length: i - start }, (_, k) => start + k);
+    const dated = members.filter((m) => placed[m].isAnchor);
+    if (dated.length === 1) for (const m of members) out[m] = recordAt.get(dated[0]);
+    start = i;
+  }
+  return out;
+}
+
 /** Header cells of `line` (plus a second header line just below it, merged by column). */
 function readHeader(lines: readonly Line[], index: number): { columns: Column[]; consumed: number } {
   const columns = lines[index].cells.map((c) => ({ name: c.text, x0: c.x0, x1: c.x1 }));
@@ -173,15 +200,18 @@ export function buildPdfTable(pages: readonly PdfItem[][]): TableRead | null {
       return { y: line.y, byColumn, isAnchor: isDateLike(date) && !TIME_ONLY.test(date), hasAmount };
     });
 
-    const anchors: Record[] = placed
-      .filter((p) => p.isAnchor)
-      .map((p) => ({ y: p.y, parts: [{ y: p.y, texts: p.byColumn }], time: [], hasAmount: p.hasAmount }));
+    const recordAt = new Map<number, Record>();
+    placed.forEach((p, i) => {
+      if (p.isAnchor) recordAt.set(i, { y: p.y, parts: [{ y: p.y, texts: p.byColumn }], time: [], hasAmount: p.hasAmount });
+    });
+    const anchors = [...recordAt.values()];
     if (anchors.length === 0) continue;
     const gaps = placed.slice(1).map((p, i) => placed[i].y - p.y);
     const maxDistance = Math.max(median(gaps), 6) * ATTACH_GAPS;
+    const blockRecord = recordsByBlock(placed, gaps, recordAt);
 
     let anchorIdx = 0;
-    for (const p of placed) {
+    for (const [index, p] of placed.entries()) {
       if (p.isAnchor) {
         anchorIdx += 1;
         continue;
@@ -191,12 +221,13 @@ export function buildPdfTable(pages: readonly PdfItem[][]): TableRead | null {
       const next = anchors[anchorIdx];
       const distPrev = anchorIdx > 0 && prev ? prev.y - p.y : prev ? 0 : Number.POSITIVE_INFINITY;
       const distNext = next ? p.y - next.y : Number.POSITIVE_INFINITY;
-      let target: Record | undefined;
-      if (p.hasAmount) {
+      // Spacing says which row the line belongs to; otherwise the nearest record takes it.
+      let target: Record | undefined = blockRecord[index];
+      if (!target && p.hasAmount) {
         // A record's amounts never come before its date line: fill the record above first.
         if (prev && !prev.hasAmount && distPrev <= maxDistance * 2) target = prev;
         else if (next && !next.hasAmount && distNext <= maxDistance) target = next;
-      } else if (distPrev <= maxDistance || distNext <= maxDistance) {
+      } else if (!target && (distPrev <= maxDistance || distNext <= maxDistance)) {
         // Text joins the nearer record (description above or below the date line).
         target = distPrev <= distNext ? prev : next;
       }

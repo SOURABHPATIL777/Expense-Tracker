@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const repo = { findBySha: vi.fn(), findById: vi.fn(), insert: vi.fn(), update: vi.fn(), deleteCascade: vi.fn() };
-const storage = { remove: vi.fn(), createUploadUrl: vi.fn(async () => "https://upload.example/put") };
+const storage = { remove: vi.fn(), head: vi.fn(), createUploadUrl: vi.fn(async () => "https://upload.example/put") };
+const enqueueJob = vi.fn();
 const files = { setStatus: vi.fn() };
 const audit = vi.fn();
 
@@ -19,7 +20,7 @@ vi.mock("@/backend/repositories/uploadedFiles.repository", () => ({ UploadedFile
 vi.mock("@/backend/services/storage", () => ({ statementStorage: storage, statementBucket: () => "bucket", statementKey: (u: string, i: string, f: string) => `${u}/${i}/${f}` }));
 vi.mock("@/backend/services/auditLog", () => ({ audit }));
 vi.mock("@/backend/services/importPipeline.service", () => ({ importPipeline: vi.fn() }));
-vi.mock("@/backend/jobs/queue", () => ({ enqueueJob: vi.fn() }));
+vi.mock("@/backend/jobs/queue", () => ({ enqueueJob }));
 vi.mock("@/backend/jobs/worker", () => ({ kickWorker: vi.fn() }));
 vi.mock("@/backend/supabase/clients", () => ({ getAdminClient: vi.fn() }));
 
@@ -58,8 +59,30 @@ describe("uploading the same file again", () => {
     expect(out.import.id).not.toBe("imp-1");
   });
 
+  it("re-reads a completed import: same import, a fresh upload URL, nothing deleted", async () => {
+    repo.findBySha.mockResolvedValue(row({ status: "completed" }));
+    const out = await service.create("u", input);
+    expect(out.import.id).toBe("imp-1");
+    expect(out.upload.url).toBe("https://upload.example/put");
+    expect(storage.createUploadUrl).toHaveBeenCalledWith("u/imp-1/statement.xlsx");
+    expect(repo.insert).not.toHaveBeenCalled();
+    expect(repo.deleteCascade).not.toHaveBeenCalled();
+  });
+
+  it("queues the re-read once the copy is uploaded, and does nothing when no copy arrived", async () => {
+    repo.findById.mockResolvedValue(row({ status: "completed" }));
+    storage.head.mockResolvedValueOnce({ sizeBytes: 10, contentType: "text/csv" });
+    await service.markUploaded("u", "imp-1");
+    expect(enqueueJob).toHaveBeenCalledWith(undefined, expect.objectContaining({ type: "reread_import", payload: { importId: "imp-1", fromFile: true } }));
+    expect(repo.update).not.toHaveBeenCalled();
+
+    enqueueJob.mockClear();
+    storage.head.mockResolvedValueOnce(null);
+    expect((await service.markUploaded("u", "imp-1")).status).toBe("completed");
+    expect(enqueueJob).not.toHaveBeenCalled();
+  });
+
   it.each([
-    ["completed", /already imported/],
     ["needs_password", /waiting for its password/],
     ["processing", /already being imported/],
   ])("still refuses a %s import", async (status, message) => {

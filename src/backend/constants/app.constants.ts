@@ -74,6 +74,20 @@ export const SOURCE_NAMES: ReadonlyArray<readonly [string, string]> = [
   ["phonepe", "phonepe"], ["google pay", "gpay"], ["gpay", "gpay"], ["paytm", "paytm"],
 ];
 
+/**
+ * Bank names as they appear in narrations. A UPI narration ends with the *payee's* bank
+ * ("…/BASAVESHWARA GRAPE PR/dry gr/State Bank Of India"), so these never decide a category and are
+ * never learned as category keywords.
+ */
+export const BANK_NAMES: readonly string[] = [
+  ...SOURCE_NAMES.map(([name]) => name).filter((n) => /\bbank\b|small finance|kotak|idfc|indusind|hsbc|standard chartered/.test(n)),
+  "airtel payments bank", "india post payments bank", "india post payments", "paytm payments bank", "fino payments bank",
+  "jio payments bank", "nsdl payments bank", "kotak mahindra bank", "idfc first bank", "au small finance bank", "deutsche bank",
+  "dbs bank", "citi bank", "citibank", "south indian bank", "karnataka bank", "karur vysya bank", "city union bank",
+  "tamilnad mercantile bank", "dhanlaxmi bank", "jammu and kashmir bank", "saraswat bank", "cosmos bank", "equitas small finance bank",
+  "ujjivan small finance bank", "esaf small finance bank", "suryoday small finance bank", "jana small finance bank",
+];
+
 export const STATEMENT_TABLE = {
   MIN_HEADER_CELLS: 3,
   /** Fewer transaction rows than this and a file isn't treated as a statement. */

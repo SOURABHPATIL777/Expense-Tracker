@@ -31,6 +31,26 @@ describe("buildPdfTable", () => {
     ]);
   });
 
+  it("keeps a 3-line Axis row whole when its date is on the last line (lines 9pt apart, rows 13pt)", () => {
+    // The first NEFT line is nearer the row above (13pt) than its own date line (18pt): spacing decides.
+    const page = [
+      ...axisHeader,
+      at("UPI/P2A/529692371916/SOURABH PATIL", 132, 554, 170),
+      at("23-10-2025", 39, 545, 42), at("/UPI/CANARA BANK", 132, 545, 80), at("500.00", 354, 545, 25), at("7536.72", 502, 545, 30),
+      at("NEFT/IN42627353946068/JIGSAW FINANCIAL", 132, 532, 190),
+      at("TECHNOLOGY/ICICI BANK LIMITED/Salary", 132, 523, 180),
+      at("30-09-2026", 39, 514, 42), at("Sept 2026", 132, 514, 45), at("78015.00", 408, 514, 30), at("85551.72", 497, 514, 35),
+      at("UPI/P2M/570648042760/URBAN TADKA", 132, 501, 160),
+      at("06-10-2026", 39, 492, 42), at("/UPI/Kotak Mahindra Bank", 132, 492, 110), at("81.00", 359, 492, 20), at("85470.72", 497, 492, 35),
+    ];
+    const rows = buildPdfTable([page])!.rows.slice(1);
+    expect(rows.map((r) => r[2])).toEqual([
+      "UPI/P2A/529692371916/SOURABH PATIL /UPI/CANARA BANK",
+      "NEFT/IN42627353946068/JIGSAW FINANCIAL TECHNOLOGY/ICICI BANK LIMITED/Salary Sept 2026",
+      "UPI/P2M/570648042760/URBAN TADKA /UPI/Kotak Mahindra Bank",
+    ]);
+  });
+
   it("puts a time under the date into its own column (Kotak-style)", () => {
     const header = [at("#", 62, 520, 4), at("TRANSACTION DATE", 75, 520, 67), at("VALUE DATE", 153, 520, 41), at("TRANSACTION DETAILS", 202, 520, 77), at("CHQ / REF NO.", 329, 520, 46), at("DEBIT/CREDIT(₹)", 407, 520, 54), at("BALANCE(₹)", 483, 520, 40)];
     const rec = (n: number, y: number, amount: string) => [

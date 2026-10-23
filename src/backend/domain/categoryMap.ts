@@ -1,4 +1,5 @@
 import "server-only";
+import { BANK_NAMES } from "@/backend/constants/app.constants";
 import type { TransactionKind } from "@/backend/constants/enums.constants";
 
 export type MapEntry = {
@@ -34,6 +35,16 @@ export function normalizeKeyword(raw: string | null | undefined): string | null 
   const k = normalizeForMatch(raw ?? "");
   return k.length >= 2 && k.length <= 60 && /^[a-z0-9][a-z0-9 ]+$/.test(k) ? k : null;
 }
+
+/** Any known bank name, with an optional "ltd"/"limited", on normalised text (letters, digits, spaces only). */
+const BANK_NAME = new RegExp(String.raw`\b(?:${[...BANK_NAMES].map(normalizeForMatch).sort((a, b) => b.length - a.length).join("|")})(?: bank)?(?: ltd| limited)?\b`, "g");
+
+/** Text with bank names removed: "…/dry gr/State Bank Of India" → "… dry gr". */
+export const withoutBankNames = (text: string | null | undefined) =>
+  text ? normalizeForMatch(text).replace(BANK_NAME, " ").replace(/\s+/g, " ").trim() : text;
+
+/** A bank's name, or any phrase with the word "bank": never a category keyword. */
+export const isBankKeyword = (keyword: string) => /\bbank\b/.test(keyword) || normalizeForMatch(keyword).replace(BANK_NAME, "").trim() === "";
 
 const haystack = (texts: ReadonlyArray<string | null | undefined>) => ` ${normalizeForMatch(texts.filter(Boolean).join(" "))} `;
 

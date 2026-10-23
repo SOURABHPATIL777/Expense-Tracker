@@ -1,7 +1,7 @@
 import "server-only";
 import { parseAmountToMinor } from "@/shared/utils/money";
 import type { Direction, TransactionStatus } from "@/backend/constants/enums.constants";
-import { parseUpiNarration } from "@/backend/domain/upiParse";
+import { parseTransferNarration, parseUpiNarration, payeeFromText } from "@/backend/domain/upiParse";
 import { istDate, parseStatementDate } from "./dates";
 import { directionsFromBalance } from "./balanceCheck";
 import { nullIfEmpty, normalizeHeader } from "./text";
@@ -109,7 +109,7 @@ function buildEvent(fields: {
     amountMinor: fields.amount.amountMinor,
     direction: fields.amount.direction,
     status: fields.status,
-    counterpartyName: fields.counterparty ?? upi.name,
+    counterpartyName: counterpartyFrom(fields.counterparty, fields.narration, fields.amount.direction),
     counterpartyVpa: (fields.vpa ?? upi.vpa)?.toLowerCase() ?? null,
     narration: fields.narration,
     // The UPI UTR is the cross-source key (app ↔ bank), so it wins over a bank's own reference column.
@@ -118,6 +118,16 @@ function buildEvent(fields: {
     balanceMinor: fields.balance ? parseAmountToMinor(fields.balance) : null,
     note: fields.note,
   };
+}
+
+/**
+ * Who was paid or who paid. A payee column can still say "Paid to Swiggy"; otherwise the name comes
+ * from the narration: bank UPI text, a NEFT/RTGS/IMPS transfer, or UPI-app wording
+ * ("Paid to Indian Railways UTS"). Null when none of these names anyone.
+ */
+export function counterpartyFrom(column: string | null, narration: string | null, direction: Direction): string | null {
+  if (column) return payeeFromText(column, direction) ?? column;
+  return parseUpiNarration(narration).name ?? parseTransferNarration(narration).name ?? payeeFromText(narration, direction);
 }
 
 /**

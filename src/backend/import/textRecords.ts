@@ -1,6 +1,7 @@
 import "server-only";
 import { parseAmountToMinor } from "@/shared/utils/money";
 import type { Direction, TransactionStatus } from "@/backend/constants/enums.constants";
+import { payeeFromText } from "@/backend/domain/upiParse";
 import { parseStatementDate } from "./dates";
 import { DATE_FORMAT_OPTIONS } from "./mapping";
 import { AMOUNT_IN_TEXT, DATE_IN_TEXT } from "./statementCheck";
@@ -18,11 +19,6 @@ const UTR_LABELLED = /(?:utr|upi ref(?:erence)?(?: no)?|rrn|ref(?:erence)?\.? no
 const UTR_ANY = /(?<!\d)(\d{12})(?!\d)/;
 const APP_TXN_ID = /transaction id\s*[:#.-]?\s*([A-Z]{1,4}\d{10,})/i;
 const VPA = /\b[a-z0-9._-]{2,}@[a-z][a-z0-9.]{1,}\b/i;
-/** An optional amount between the verb and "to"/"from" ("Paid ₹350.00 to Swiggy"). */
-const AMT = String.raw`(?:\s+(?:₹|rs\.?|inr)?\s*[\d,]+(?:\.\d{1,2})?)?`;
-const STOP = String.raw`(?=\s+(?:using|on|via|debit|credit|note:|upi\b|from|to)\b|\s+[-+]?\s*(?:₹|rs\.|rs\s|inr\s)|[;|]|$)`;
-const OUT = new RegExp(String.raw`(?:paid|sent|money sent|transferred|transfer|payment)${AMT}\s+to\s+(.+?)${STOP}`, "im");
-const IN = new RegExp(String.raw`(?:received|money received|credited|payment)${AMT}\s+(?:from|by)\s+(.+?)${STOP}`, "im");
 const DEBIT_WORDS = /\b(debit|debited|dr|paid|sent|purchase|spent|withdrawn)\b/gi;
 const CREDIT_WORDS = /\b(credit|credited|cr|received|refund|refunded|cashback|added)\b/gi;
 const FOOTER = /^(page \d+( of \d+)?|.*system generated.*|.*this is a computer generated.*)$/i;
@@ -31,8 +27,6 @@ const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "
 const DAY_MONTH = /^(\d{1,2}) (jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b(?![ ,'-]*\d{2,4}\b)/i;
 /** The statement period at the top ("1 Nov'23 - 31 Oct'24", "01 Apr 2026 to 30 Apr 2026"). */
 const PERIOD = /(\d{1,2})[ -]([a-z]{3})[a-z]*[ ,'-]+(\d{2,4})\s*(?:-|to|–)\s*(\d{1,2})[ -]([a-z]{3})[a-z]*[ ,'-]+(\d{2,4})/i;
-/** The user's own account in a "Your Account" column ("HDFC Bank - 12"), trailing a payee name. */
-const OWN_ACCOUNT = /\s+\S+\s+bank(?:\s+[a-z]{1,4})?(?:\s+-\s*\d+)?\s*$/i;
 
 type Period = { start: number; end: number };
 
@@ -91,7 +85,6 @@ function parseRecord(text: string, period: Period | null): { parsed: ParsedEvent
   if (!dir) return { parsed: null, error: "Could not tell debit from credit" };
   const status: TransactionStatus = /\bfailed\b/i.test(text) ? "failed" : /\bpending\b/i.test(text) ? "pending" : "success";
   const reference = UTR_LABELLED.exec(text)?.[1] ?? UTR_ANY.exec(text)?.[1] ?? null;
-  const party = (dir === "debit" ? OUT : IN).exec(text)?.[1] ?? (dir === "debit" ? IN : OUT).exec(text)?.[1] ?? null;
   const firstLine = text.split("\n")[0].replace(ISO_TIMESTAMP, "").replace(DATE_IN_TEXT, "").replace(/\btime:\s*;?/i, "").trim();
   return {
     error: null,
@@ -100,7 +93,7 @@ function parseRecord(text: string, period: Period | null): { parsed: ParsedEvent
       amountMinor: Math.abs(amountMinor),
       direction: dir,
       status,
-      counterpartyName: nullIfEmpty(party?.replace(/\s+/g, " ").replace(OWN_ACCOUNT, "").slice(0, 120)),
+      counterpartyName: payeeFromText(text, dir),
       counterpartyVpa: VPA.exec(text)?.[0]?.toLowerCase() ?? null,
       narration: nullIfEmpty(firstLine.slice(0, 300)),
       referenceId: reference,

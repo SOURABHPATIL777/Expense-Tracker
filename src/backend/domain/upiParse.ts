@@ -48,3 +48,53 @@ export function parseUpiNarration(narration: string | null | undefined): UpiNarr
 
   return { isUpi: true, utr, vpa, name };
 }
+
+const TRANSFER = /^\s*\/?\s*(NEFT|RTGS|IMPS)\b/i;
+const TRANSFER_NOISE = /^(neft|rtgs|imps)(\s+(cr|dr))?$|^(cr|dr|p2a|p2m|upi|na|null|transfer|inft|mob|ib)$/i;
+
+/**
+ * The other party of a NEFT/RTGS/IMPS narration, e.g.
+ *   Axis  "NEFT/IN42627353946068/JIGSAW FINANCIAL TECHNOLOGY/ICICI BANK LIMITED/Salary Sept 2026"
+ *   AU    "NEFT CR- HDFCN52025081108659761 - YELLOW WINDOWS COMMUNICATIONS LLP - HDFC0000001 -0001-INVESTMENT"
+ *   Kotak "NEFT-ZEPTO PRIVATE LIMITE- CMS2742541845650"
+ *   Axis  "IMPS/P2A/624614497257/Mr.SourabhPatil/X030 278/IDFCBank/"
+ * The first segment after the transfer reference that reads as a name (not a reference, IFSC,
+ * bank or code).
+ */
+export function parseTransferNarration(narration: string | null | undefined): { name: string | null } {
+  const text = (narration ?? "").trim();
+  if (!TRANSFER.test(text)) return { name: null };
+  const segments = text
+    .split(/\s*[/\\|]\s*|\s+-\s*|\s*-\s+|-(?=[A-Z0-9])/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const name =
+    segments.find((s, i) => {
+      if (i === 0 || TRANSFER_NOISE.test(s)) return false;
+      if (/\d{5,}/.test(s.replace(/\s/g, ""))) return false; // a reference, UTR or account number
+      if (IFSC.test(s.toUpperCase()) || VPA.test(s)) return false;
+      if (/bank\b|^bank/i.test(s)) return false;
+      return /[a-z]{3,}/i.test(s) && s.replace(/[^a-z]/gi, "").length >= 3;
+    }) ?? null;
+  return { name };
+}
+
+/** An optional amount between the verb and "to"/"from" ("Paid ₹350.00 to Swiggy"). */
+const AMT = String.raw`(?:\s+(?:₹|rs\.?|inr)?\s*[\d,]+(?:\.\d{1,2})?)?`;
+const STOP = String.raw`(?=\s+(?:(?:using|on|via|debit|credit|upi|from|to)\b|note:)|\s+[-+]?\s*(?:₹|rs\.|rs\s|inr\s)|[;|]|$)`;
+const PAID_TO = new RegExp(String.raw`(?:paid|sent|money sent|transferred|transfer|payment)${AMT}\s+to\s+(.+?)${STOP}`, "im");
+const RECEIVED_FROM = new RegExp(String.raw`(?:received|money received|credited|payment)${AMT}\s+(?:from|by)\s+(.+?)${STOP}`, "im");
+/** The user's own account in a "Your Account" column ("HDFC Bank - 12"), trailing a payee name. */
+const OWN_ACCOUNT = /\s+\S+\s+bank(?:\s+[a-z]{1,4})?(?:\s+-\s*\d+)?\s*$/i;
+
+/**
+ * The payee in UPI-app wording: "Paid to Indian Railways UTS", "Money sent to Ravi Kumar",
+ * "Received ₹500 from Asha". The phrase matching the direction is tried first.
+ */
+export function payeeFromText(text: string | null | undefined, direction: "debit" | "credit"): string | null {
+  if (!text) return null;
+  const [first, second] = direction === "debit" ? [PAID_TO, RECEIVED_FROM] : [RECEIVED_FROM, PAID_TO];
+  const raw = first.exec(text)?.[1] ?? second.exec(text)?.[1] ?? null;
+  const name = raw?.replace(/\s+/g, " ").replace(OWN_ACCOUNT, "").trim().slice(0, 120);
+  return name && /[a-z]{2,}/i.test(name) ? name : null;
+}

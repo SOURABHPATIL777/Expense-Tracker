@@ -4,9 +4,9 @@ import { defineJob } from "@/backend/jobs/defineJob";
 import { classificationService, type ClassifyScope } from "@/backend/services/classification.service";
 
 const payload = z.union([
-  z.object({ scope: z.literal("all"), cursor: z.uuid().optional() }),
+  z.object({ scope: z.literal("all"), cursor: z.uuid().optional(), rulesOnly: z.boolean().optional() }),
   // `scope` defaults to "import" so AFTER_IMPORT_JOBS can enqueue a bare `{ importId }`.
-  z.object({ scope: z.literal("import").default("import"), importId: z.uuid(), cursor: z.uuid().optional() }),
+  z.object({ scope: z.literal("import").default("import"), importId: z.uuid(), cursor: z.uuid().optional(), redo: z.boolean().optional() }),
 ]);
 
 export const classifyTransactionsJob = defineJob({

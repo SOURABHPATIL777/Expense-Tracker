@@ -22,7 +22,7 @@ import { mapColumnsLocally } from "@/backend/import/headerMapping";
 import { configFromMapping } from "@/backend/import/mapping";
 import { proveMapping } from "@/backend/import/proveMapping";
 import { parseTextRecords } from "@/backend/import/textRecords";
-import { detectConfig, extract, findHeaderRow } from "@/backend/import/engine";
+import { counterpartyFrom, detectConfig, extract, findHeaderRow } from "@/backend/import/engine";
 import { istDate } from "@/backend/import/dates";
 import { headerSignature } from "@/backend/import/text";
 import type { ExtractedRow, ExtractResult, ImportConfig, ParsedEvent, ReaderId, TableRead } from "@/backend/import/types";
@@ -31,12 +31,16 @@ import { matchIncoming, type ExistingTransaction } from "@/backend/domain/matche
 import { inferKind, paymentRail } from "@/backend/domain/inferKind";
 import { displayMerchant } from "@/backend/domain/merchant";
 import { mapColumnsWithLlm } from "@/backend/llm/columnMapping";
+import { mapLimit } from "@/backend/llm/concurrency";
+import { inBatches } from "@/backend/repositories/inBatches";
 import { statementStorage } from "./storage";
 
 /** Statuses from which the extract stage may (re)run (`parsing`: interrupted, or left by the retired AI reader). */
 const EXTRACTABLE = new Set<ImportStatus>(["queued", "parsing", "needs_password"]);
 const HOUR_MS = 3_600_000;
 const TEXT_LIMIT = 500;
+/** Transaction updates sent at once while re-reading an import. */
+const REREAD_WRITES_PARALLEL = 8;
 
 type Detected = Source & { layoutId: string | null; label: string; readByAi: boolean; configId: string };
 
@@ -60,9 +64,9 @@ const fallbackSource = (kind: SourceKind | null): Source =>
 
 /**
  * Two-stage import pipeline:
- *  1. extract: read the file and work out its layout and source. Order: stored layouts (shared by
- *     all users), then for CSV/Excel an LLM column mapping (proved on the file, then stored), and
- *     for PDFs an LLM reading the rows chunk by chunk (each row verified against the text).
+ *  1. extract: read the file and work out its layout and source, on the server: stored layouts
+ *     (shared by all users), else a mapping from the header names, else (last resort) the LLM given
+ *     the header and a few redacted rows; statements that aren't tables are read as text records.
  *  2. process: in resumable chunks, match raw events against existing transactions (UTR first,
  *     then amount+time as a review candidate) and create/link transactions.
  * Works with either the user's client (inline, RLS-scoped) or the worker's service client.
@@ -156,6 +160,7 @@ export function importPipeline(db: Db, log: Logger) {
     table: TableRead,
     formatLabel: string,
     source: Source | null,
+    allowAi: boolean,
   ): Promise<{ result: ExtractResult; detected: Detected } | null> {
     type Mapping = { config: ImportConfig; detected: Detected };
     const mappings = new Map<string, Mapping | null>();
@@ -165,7 +170,7 @@ export function importPipeline(db: Db, log: Logger) {
 
     for (const section of splitSections(table)) {
       const key = section.signature || "__whole__";
-      if (!mappings.has(key)) mappings.set(key, await mapSection(userId, row, section.read, formatLabel, source));
+      if (!mappings.has(key)) mappings.set(key, await mapSection(userId, row, section.read, formatLabel, source, allowAi));
       const mapping = mappings.get(key);
       if (!mapping) continue;
       first ??= mapping.detected;
@@ -189,6 +194,7 @@ export function importPipeline(db: Db, log: Logger) {
     read: TableRead,
     formatLabel: string,
     source: Source | null,
+    allowAi: boolean,
   ): Promise<{ config: ImportConfig; detected: Detected } | null> {
     const match = await matchLayout(read);
     const stored = match ? proveMapping(read, match.config) : null;
@@ -213,6 +219,7 @@ export function importPipeline(db: Db, log: Logger) {
       }
       log.info({ importId: row.id, reason: proof.problems }, "local mapping not proved; asking the AI");
     }
+    if (!allowAi) return null;
 
     try {
       const mapped = await mapColumnsWithLlm(userId, row.file_name, read, formatLabel);
@@ -236,6 +243,46 @@ export function importPipeline(db: Db, log: Logger) {
     }
   }
 
+  /**
+   * Reads a statement file into rows and works out its source, with no AI unless `allowAi` (the
+   * last-resort column mapping for a header nothing else understands). Throws AppErrors.
+   */
+  async function readStatement(row: ImportRow, opts: { password?: string; allowAi: boolean }): Promise<{ result: ExtractResult; detected: Detected }> {
+    const { buffer, reader } = await loadFile(row);
+    const read = await readFile(reader, buffer, opts.password);
+    // Cheap gate: a statement has rows with dates and amounts.
+    assertLooksLikeStatement(read);
+    const formatLabel = READER_LABELS[reader];
+    const table = read.kind === "table" ? read : read.table;
+    // Whose statement it is, from its own header (IFSC, bank/app name) or the file name.
+    const firstLines = read.kind === "text" ? read.lines : (table?.rows ?? []).map((r) => r.filter(Boolean).join(" "));
+    const source = detectSource(row.file_name, firstLines);
+
+    // Tables (CSV/Excel, HTML tables, JSON records, PDFs laid out as tables): every section.
+    if (table) {
+      const sections = await readTableSections(row.user_id, row, table, formatLabel, source, opts.allowAi);
+      if (sections) return { result: sections.result, detected: withSource(sections.detected, source, formatLabel) };
+    }
+    if (read.kind === "table") {
+      throw new AppError("IMPORT_UNREADABLE", { message: "We couldn't work out this file's columns. Try exporting it again, or as a different format." });
+    }
+
+    // Statements that aren't tables (UPI-app PDFs, activity pages, JSON lines): read locally.
+    const records = parseTextRecords(read.lines);
+    const parsed = records.filter((r) => r.parsed).length;
+    if (parsed < STATEMENT_TABLE.MIN_TRANSACTION_ROWS || parsed / records.length < TEXT_RECORDS_MIN_SHARE) {
+      throw new AppError("IMPORT_UNREADABLE", {
+        message: "We couldn't read the transactions in this file. Download the statement as Excel or CSV if your app offers it.",
+      });
+    }
+    // UPI-app statements often name the app only in their footer.
+    const known = source ?? detectSource(row.file_name, read.lines, "document") ?? fallbackSource("upi_app");
+    return {
+      result: withPeriod(records),
+      detected: { ...known, layoutId: null, label: `${SOURCE_APP_LABELS[known.sourceApp]} statement (${formatLabel})`, readByAi: false, configId: "text_records" },
+    };
+  }
+
   async function extractStage(userId: string, importId: string, opts: { password?: string } = {}): Promise<ImportStatus> {
     let row = await imports.findById(userId, importId);
     if (!EXTRACTABLE.has(row.status)) return row.status;
@@ -244,42 +291,8 @@ export function importPipeline(db: Db, log: Logger) {
     await files.setStatus(userId, row.file_path, "processing");
 
     try {
-      const { buffer, reader } = await loadFile(row);
-      const read = await readFile(reader, buffer, opts.password);
-      // Cheap gate: a statement has rows with dates and amounts.
-      assertLooksLikeStatement(read);
-      const formatLabel = READER_LABELS[reader];
-      const table = read.kind === "table" ? read : read.table;
-      // Whose statement it is, from its own header (IFSC, bank/app name) or the file name.
-      const firstLines = read.kind === "text" ? read.lines : (table?.rows ?? []).map((r) => r.filter(Boolean).join(" "));
-      const source = detectSource(row.file_name, firstLines);
-
-      // Tables (CSV/Excel, HTML tables, JSON records, PDFs laid out as tables): every section.
-      if (table) {
-        const sections = await readTableSections(userId, row, table, formatLabel, source);
-        if (sections) return await saveExtracted(row, sections.result, withSource(sections.detected, source, formatLabel));
-      }
-      if (read.kind === "table") {
-        throw new AppError("IMPORT_UNREADABLE", { message: "We couldn't work out this file's columns. Try exporting it again, or as a different format." });
-      }
-
-      // Statements that aren't tables (UPI-app PDFs, activity pages, JSON lines): read locally.
-      const records = parseTextRecords(read.lines);
-      const parsed = records.filter((r) => r.parsed).length;
-      if (parsed < STATEMENT_TABLE.MIN_TRANSACTION_ROWS || parsed / records.length < TEXT_RECORDS_MIN_SHARE) {
-        throw new AppError("IMPORT_UNREADABLE", {
-          message: "We couldn't read the transactions in this file. Download the statement as Excel or CSV if your app offers it.",
-        });
-      }
-      // UPI-app statements often name the app only in their footer.
-      const known = source ?? detectSource(row.file_name, read.lines, "document") ?? fallbackSource("upi_app");
-      return await saveExtracted(row, withPeriod(records), {
-        ...known,
-        layoutId: null,
-        label: `${SOURCE_APP_LABELS[known.sourceApp]} statement (${formatLabel})`,
-        readByAi: false,
-        configId: "text_records",
-      });
+      const { result, detected } = await readStatement(row, { password: opts.password, allowAi: true });
+      return await saveExtracted(row, result, detected);
     } catch (err) {
       if (err instanceof AppError && err.code === "PASSWORD_REQUIRED") {
         return setStatus(row, "needs_password", opts.password ? err.message : null, err.code);
@@ -291,6 +304,13 @@ export function importPipeline(db: Db, log: Logger) {
     }
   }
 
+  /** The text fields a row gives its transaction. */
+  const textFields = (e: ParsedEvent) => ({
+    merchant_raw: (e.counterpartyName ?? e.narration)?.slice(0, TEXT_LIMIT) ?? null,
+    merchant_normalized: displayMerchant(e.counterpartyName, e.counterpartyVpa),
+    narration: e.narration?.slice(0, TEXT_LIMIT) ?? null,
+  });
+
   function buildTransaction(id: string, row: ImportRow, e: ParsedEvent, ownVpas: ReadonlySet<string>, flagged: boolean): Partial<TransactionRow> {
     return {
       id,
@@ -300,10 +320,8 @@ export function importPipeline(db: Db, log: Logger) {
       transaction_kind: inferKind(e, ownVpas),
       status: e.status,
       occurred_at: e.occurredAt,
-      merchant_raw: (e.counterpartyName ?? e.narration)?.slice(0, TEXT_LIMIT) ?? null,
-      merchant_normalized: displayMerchant(e.counterpartyName, e.counterpartyVpa),
+      ...textFields(e),
       counterparty_vpa: e.counterpartyVpa,
-      narration: e.narration?.slice(0, TEXT_LIMIT) ?? null,
       note: e.note?.slice(0, TEXT_LIMIT) ?? null,
       payment_rail: paymentRail(e, row.source_kind ?? "bank"),
       reference_id: e.referenceId,
@@ -497,6 +515,74 @@ export function importPipeline(db: Db, log: Logger) {
     return { done: true };
   }
 
+  /**
+   * Brings a completed import's rows and transactions up to date with today's reader, with no AI:
+   * from its file when that has just been uploaded again (`fromFile`), otherwise from the rows
+   * stored at import time (names worked out again from their statement text). Rows are paired by
+   * position, and only where date, amount and direction agree. A transaction's text changes only
+   * where it still holds what this row gave it, so a linked UPI app's payee name stays.
+   */
+  async function rereadImport(userId: string, importId: string, opts: { fromFile: boolean }): Promise<{ changed: number; mismatched: number } | null> {
+    const row = await imports.findById(userId, importId);
+    if (row.status !== "completed") return null;
+    const old = (await rawEvents.listAll(userId, (q) => q.eq("import_id", importId))).filter((r) => r.parsed);
+
+    let fresh: Map<number, Pick<ExtractedRow, "raw" | "parsed">>;
+    if (opts.fromFile) {
+      try {
+        const { result } = await readStatement(row, { allowAi: false });
+        fresh = new Map(result.rows.map((r) => [r.rowIndex, r]));
+      } finally {
+        // The copy uploaded again was only needed for this read.
+        await statementStorage.remove(row.file_path);
+      }
+    } else {
+      fresh = new Map(
+        old.map((r) => {
+          const e = r.parsed as ParsedEvent;
+          return [r.row_index, { raw: r.raw as ExtractedRow["raw"], parsed: { ...e, counterpartyName: counterpartyFrom(e.counterpartyName, e.narration, e.direction) } }];
+        }),
+      );
+    }
+
+    const sameRow = (a: ParsedEvent, b: ParsedEvent) => istDate(a.occurredAt) === istDate(b.occurredAt) && a.amountMinor === b.amountMinor && a.direction === b.direction;
+    const pairs = old.flatMap((r) => {
+      const f = fresh.get(r.row_index);
+      return f?.parsed && sameRow(r.parsed as ParsedEvent, f.parsed) ? [{ old: r, before: r.parsed as ParsedEvent, after: f.parsed, raw: f.raw }] : [];
+    });
+    const mismatched = old.length - pairs.length;
+    // Fingerprints are numbered over the whole file, so they're only redone when every row paired.
+    const fingerprints = mismatched === 0 ? fingerprintAll(row.source_app ?? "other_bank", pairs.map((p) => p.after)) : null;
+
+    const rawUpdates = pairs.flatMap((p, i) => {
+      const fingerprint = fingerprints?.[i] ?? p.old.fingerprint;
+      return JSON.stringify(p.before) === JSON.stringify(p.after) && fingerprint === p.old.fingerprint ? [] : [{ ...p.old, raw: p.raw, parsed: p.after, fingerprint }];
+    });
+
+    // Only transactions this import created; a row linked to another import's transaction added nothing to replace.
+    const owned = pairs.filter((p) => p.old.status === "accepted" && p.old.transaction_id);
+    const current = new Map(
+      (await inBatches(owned.map((p) => p.old.transaction_id!), (ids) => transactions.listAll(userId, (q) => q.in("id", ids)))).map((t) => [t.id, t]),
+    );
+    const patches = owned.flatMap((p) => {
+      const tx = current.get(p.old.transaction_id!);
+      if (!tx) return [];
+      const [before, after] = [textFields(p.before), textFields(p.after)];
+      const patch: Partial<TransactionRow> = {};
+      for (const key of ["merchant_raw", "merchant_normalized", "narration"] as const) {
+        if (tx[key] === before[key] && after[key] !== before[key]) patch[key] = after[key];
+      }
+      if (!tx.counterparty_vpa && p.after.counterpartyVpa) patch.counterparty_vpa = p.after.counterpartyVpa;
+      if (!tx.reference_id && p.after.referenceId) patch.reference_id = p.after.referenceId;
+      return Object.keys(patch).length ? [{ id: tx.id, patch }] : [];
+    });
+
+    await rawEvents.saveOutcomes(userId, rawUpdates);
+    await mapLimit(patches, REREAD_WRITES_PARALLEL, (p) => transactions.enrich(userId, p.id, p.patch));
+    log.info({ importId, fromFile: opts.fromFile, rows: old.length, rawUpdated: rawUpdates.length, changed: patches.length, mismatched }, "import re-read");
+    return { changed: patches.length, mismatched };
+  }
+
   /** Gives up on an import that is still in progress (its background job ran out of retries). */
   async function markFailed(userId: string, importId: string, message: string): Promise<void> {
     const row = await imports.findById(userId, importId);
@@ -505,5 +591,5 @@ export function importPipeline(db: Db, log: Logger) {
     await setStatus(row, "failed", message, "IMPORT_INTERRUPTED");
   }
 
-  return { extractStage, processStep, markFailed };
+  return { extractStage, processStep, markFailed, rereadImport };
 }

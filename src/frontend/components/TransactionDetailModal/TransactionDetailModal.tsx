@@ -49,7 +49,9 @@ export function TransactionDetailModal({ id, categoryOptions, onClose, onChanged
     toast.show(
       more > 0
         ? `Saved. Also updated ${more} similar transaction${more === 1 ? "" : "s"} with the same ${t.counterpartyVpa ? "UPI ID" : "name"}.`
-        : "Saved. Future transactions with the same UPI ID or name will follow your choice.",
+        : values.categoryId
+          ? "Saved. Checking your other transactions from this merchant, and future ones will follow your choice."
+          : "Saved. Future transactions with the same UPI ID or name will follow your choice.",
       "success",
     );
     detail.reload();

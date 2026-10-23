@@ -5,8 +5,10 @@ import { TABLES } from "@/backend/constants/db.constants";
 import { unwrap } from "@/backend/errors/AppError";
 import { counterpartyKey, COUNTERPARTY_COLUMN } from "@/backend/domain/counterparty";
 import { RulesRepository } from "@/backend/repositories/categorization.repository";
+import { ReviewItemsRepository } from "@/backend/repositories/reviewItems.repository";
 import { TransactionsRepository } from "@/backend/repositories/transactions.repository";
 import type { TransactionRow } from "@/backend/repositories/types";
+import { reclassifyAll } from "./categorization.service";
 
 /** Auto rules run before the user's broader rules (lower number wins) but after anything more specific they set. */
 const AUTO_RULE_PRIORITY = 50;
@@ -37,6 +39,8 @@ export async function rememberCounterparty(
   const patch: Partial<TransactionRow> = {
     ...(outcome.categoryId && { category_id: outcome.categoryId, category_source: "rule" as const, category_confidence: 1 }),
     ...(outcome.kind && { transaction_kind: outcome.kind }),
+    // The user's answer covers these too: nothing left to review about their category.
+    review_status: "ok",
   };
   const updated = unwrap(
     await db
@@ -50,6 +54,7 @@ export async function rememberCounterparty(
       .select("id"),
     "categorization.applySimilar",
   ) as Array<{ id: string }>;
+  if (updated.length) await new ReviewItemsRepository(db).resolveCategoryQuestions(userId, updated.map((u) => u.id), "same_counterparty");
   return updated.length;
 }
 
@@ -59,5 +64,9 @@ export async function spreadManualEdit(db: Db, userId: string, transactionId: st
   const tx = await new TransactionsRepository(db).findById(userId, transactionId);
   // A category change also fixes the type it resolved to, so similar payments count the same way.
   const kind = edit.kind ?? (edit.categoryId ? tx.transaction_kind : null);
-  return rememberCounterparty(db, userId, tx, { categoryId: edit.categoryId ?? null, kind });
+  const updated = await rememberCounterparty(db, userId, tx, { categoryId: edit.categoryId ?? null, kind });
+  // A new category keyword (learned in recategorize) also reaches older transactions of that
+  // merchant under other UPI IDs: re-run rules and keywords (no AI) over everything not set by hand.
+  if (edit.categoryId) await reclassifyAll(userId, { rulesOnly: true });
+  return updated;
 }

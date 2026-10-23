@@ -23,10 +23,12 @@ import type {
 } from "@/backend/repositories/types";
 import { firstMatchingRule, type Rule } from "@/backend/domain/rules";
 import {
+  isBankKeyword,
   keywordAppearsIn,
   matchCategory,
   normalizeKeyword,
   resolveCategory,
+  withoutBankNames,
 } from "@/backend/domain/categoryMap";
 import { looksLikeIndividual } from "@/backend/domain/individual";
 import {
@@ -57,8 +59,10 @@ export const INDIVIDUAL_CATEGORY = "Individual";
 export const SALARY_CATEGORY = "Salary";
 
 export type ClassifyScope =
-  | { scope: "import"; importId: string; cursor?: string }
-  | { scope: "all"; cursor?: string };
+  /** `redo`: everything in the import the user didn't set, not only what's uncategorised (after a re-read). */
+  | { scope: "import"; importId: string; cursor?: string; redo?: boolean }
+  /** `rulesOnly`: rules and keywords only; transactions they don't match are left as they are (no AI). */
+  | { scope: "all"; cursor?: string; rulesOnly?: boolean };
 
 type Patch = Partial<
   Pick<
@@ -82,13 +86,28 @@ const toRule = (r: RuleRow): Rule => ({
   priority: r.priority,
 });
 
-/** The text a keyword can match: merchant, raw merchant, narration and UPI handle. */
-export const matchTexts = (
-  t: Pick<
-    TransactionRow,
-    "merchant_normalized" | "merchant_raw" | "narration" | "counterparty_vpa"
-  >,
-) => [t.merchant_normalized, t.merchant_raw, t.narration, t.counterparty_vpa];
+type MatchFields = Pick<
+  TransactionRow,
+  "merchant_normalized" | "merchant_raw" | "narration" | "counterparty_vpa"
+>;
+
+/**
+ * The text a keyword can match: merchant, raw merchant, narration and UPI handle. Bank names are
+ * left out: in a narration they name the payee's bank, not what the payment was for.
+ */
+export const matchTexts = (t: MatchFields) => [
+  t.merchant_normalized,
+  withoutBankNames(t.merchant_raw),
+  withoutBankNames(t.narration),
+  t.counterparty_vpa,
+];
+
+/** Who was paid: the merchant name and UPI handle, not the narration (which also names banks and notes). */
+export const nameTexts = (t: MatchFields) => [
+  t.merchant_normalized,
+  t.merchant_raw !== t.narration ? t.merchant_raw : null,
+  t.counterparty_vpa,
+];
 
 /** Debits default to spending; credits stay `unknown` (a friend repaying is not income) until decided. */
 const defaultKind = (t: TransactionRow): TransactionKind =>
@@ -167,8 +186,8 @@ export function classificationService(db: Db, log: Logger) {
     if (ids.length === 0) return { rows: [], cursor: null };
     const rows = await transactions.listAll(userId, (q) => {
       const base = q.in("id", ids).eq("user_locked", false);
-      // An import pass only fills gaps; a full pass (after rule changes) redoes everything the user didn't set.
-      return s.scope === "import"
+      // An import pass only fills gaps; a full pass (after rule changes) or a re-read redoes everything the user didn't set.
+      return s.scope === "import" && !s.redo
         ? base.is("category_id", null)
         : base.or("category_source.is.null,category_source.neq.user");
     });
@@ -316,7 +335,8 @@ export function classificationService(db: Db, log: Logger) {
           item.isIndividual ||
           !category ||
           !keyword ||
-          !keywordAppearsIn(matchTexts(t), keyword)
+          isBankKeyword(keyword) ||
+          !keywordAppearsIn(nameTexts(t), keyword)
         )
           continue;
         if (category.default_category_id)
@@ -446,6 +466,7 @@ export function classificationService(db: Db, log: Logger) {
         });
         continue;
       }
+      if (scope.scope === "all" && scope.rulesOnly) continue;
       patches.set(t.id, { transaction_kind: defaultKind(t) });
       pendingLlm.push(t);
     }

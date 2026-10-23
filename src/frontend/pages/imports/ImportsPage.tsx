@@ -70,7 +70,9 @@ const columns = (onDelete: (i: ImportDto) => void): Column<ImportDto>[] => [
 function uploadDetail(item: UploadItem): string {
   if (item.status === "error") return item.error ?? "Upload failed.";
   if (item.stage) return STAGE_LABELS[item.stage];
-  return item.status === "done" ? "Reading in the background" : "Waiting to upload";
+  if (item.status !== "done") return "Waiting to upload";
+  // The same statement uploaded again updates the transactions it brought in.
+  return item.import?.status === "completed" ? "Already imported: updating its transactions" : "Reading in the background";
 }
 
 function UploadRow({ item, onRetry }: { item: UploadItem; onRetry: () => void }) {

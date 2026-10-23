@@ -5,7 +5,7 @@ import { CategoriesRepository, RulesRepository } from "@/backend/repositories/ca
 import { CategoryKeywordsRepository } from "@/backend/repositories/categoryKeywords.repository";
 import { TransactionsRepository } from "@/backend/repositories/transactions.repository";
 import { toCategoryDto, toCategoryRow, toRuleDto, toRuleRow } from "@/backend/mappers/transactions.mapper";
-import { matchCategory, normalizeKeyword } from "@/backend/domain/categoryMap";
+import { isBankKeyword, matchCategory, normalizeKeyword } from "@/backend/domain/categoryMap";
 import { looksLikeIndividual } from "@/backend/domain/individual";
 import { matchTexts } from "./classification.service";
 import { enqueueJob } from "@/backend/jobs/queue";
@@ -24,9 +24,17 @@ export function categoriesService(db: Db) {
   };
 }
 
-/** Re-runs rules + learned merchants over every transaction the user hasn't set by hand. */
-export async function reclassifyAll(userId: string): Promise<void> {
-  await enqueueJob(getAdminClient(), { type: "classify_transactions", userId, payload: { scope: "all" }, idempotencyKey: `classify:all:${randomUUID()}` });
+/**
+ * Re-runs rules + learned merchants over every transaction the user hasn't set by hand.
+ * `rulesOnly` skips the AI for transactions nothing matches (after a single edit).
+ */
+export async function reclassifyAll(userId: string, opts: { rulesOnly?: boolean } = {}): Promise<void> {
+  await enqueueJob(getAdminClient(), {
+    type: "classify_transactions",
+    userId,
+    payload: { scope: "all", ...(opts.rulesOnly && { rulesOnly: true }) },
+    idempotencyKey: `classify:all:${randomUUID()}`,
+  });
   kickWorker();
 }
 
@@ -71,8 +79,9 @@ export async function recategorize(db: Db, userId: string, transactionId: string
 
   if (looksLikeIndividual({ merchant: tx.merchant_normalized ?? tx.merchant_raw, vpa: tx.counterparty_vpa, narration: tx.narration })) return;
   const keywords = new CategoryKeywordsRepository(db);
-  // Reuse the keyword that identified this merchant; otherwise learn its name.
+  // Reuse the keyword that identified this merchant; otherwise learn its name. Never the narration
+  // ("…salary june 2026" would match nothing else) and never a bank's name.
   const matched = matchCategory(matchTexts(tx), await keywords.entriesFor(userId));
-  const keyword = matched?.keyword ?? normalizeKeyword(tx.merchant_normalized ?? tx.merchant_raw);
-  if (keyword) await keywords.learnForUser(userId, keyword, category.id, kind ?? null, "user");
+  const keyword = matched?.keyword ?? normalizeKeyword(tx.merchant_normalized);
+  if (keyword && !isBankKeyword(keyword)) await keywords.learnForUser(userId, keyword, category.id, kind ?? null, "user");
 }

@@ -17,6 +17,7 @@ export const AUDIT_ACTIONS = {
   IMPORT_CREATED: "import.created",
   IMPORT_DELETED: "import.deleted",
   IMPORT_REPLACED: "import.replaced",
+  IMPORT_REREAD: "import.reread",
   TRANSACTION_UPDATED: "transaction.updated",
   LLM_CONFIG_UPDATED: "llm_config.updated",
   SPLIT_CREATED: "split.created",
