@@ -90,3 +90,14 @@ describe("deleting an import", () => {
     expect(storage.remove).not.toHaveBeenCalled();
   });
 });
+
+describe("stuck imports", () => {
+  it("replaces an import that has been 'in progress' without change for over 15 minutes", async () => {
+    const { replaceable } = await import("@/backend/services/imports.service");
+    const now = Date.parse("2026-10-23T12:00:00Z");
+    expect(replaceable({ status: "processing", updated_at: "2026-10-23T11:30:00Z" }, now)).toBe(true);
+    expect(replaceable({ status: "processing", updated_at: "2026-10-23T11:55:00Z" }, now)).toBe(false);
+    expect(replaceable({ status: "completed", updated_at: "2026-10-01T00:00:00Z" }, now)).toBe(false);
+    expect(replaceable({ status: "failed", updated_at: "2026-10-23T11:59:00Z" }, now)).toBe(true);
+  });
+});

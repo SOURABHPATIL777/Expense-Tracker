@@ -21,6 +21,14 @@ import { ACTIVE_IMPORT_STATUSES, type CreateImportInput, type CreateImportResult
 
 /** An import still "uploaded" after this long was abandoned by the browser. */
 const UPLOAD_STALL_MS = 2 * 60_000;
+/** An import "in progress" that hasn't changed for this long is stuck (its job gave up or died). */
+const STUCK_IMPORT_MS = 15 * 60_000;
+
+const IN_PROGRESS = new Set<ImportStatus>(["queued", "parsing", "processing"]);
+
+/** Failed, or stuck in progress: uploading the same file again should replace it. */
+export const replaceable = (row: Pick<ImportRow, "status" | "updated_at">, now = Date.now()) =>
+  row.status === "failed" || (IN_PROGRESS.has(row.status) && now - Date.parse(row.updated_at) > STUCK_IMPORT_MS);
 
 /** Why the same file can't be uploaded again, by the existing import's status. */
 const DUPLICATE_MESSAGES: Partial<Record<ImportStatus, string>> = {
@@ -75,8 +83,8 @@ export function importsService(db: Db, log: Logger) {
 
     async create(userId: string, input: CreateImportInput): Promise<CreateImportResultDto> {
       let existing = await imports.findBySha(userId, input.sha256);
-      // A failed import doesn't block the same file: it is replaced (with anything it partly imported).
-      if (existing?.status === "failed") {
+      // A failed or stuck import doesn't block the same file: it is replaced (with anything it partly imported).
+      if (existing && replaceable(existing)) {
         await removeAll(existing);
         await audit(db, { userId, action: AUDIT_ACTIONS.IMPORT_REPLACED, entityType: "import", entityId: existing.id, metadata: { fileName: existing.file_name } });
         existing = null;

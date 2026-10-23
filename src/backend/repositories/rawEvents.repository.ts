@@ -1,4 +1,5 @@
 import "server-only";
+import { inBatches } from "./inBatches";
 import { TABLES } from "@/backend/constants/db.constants";
 import { unwrap, unwrapMaybe } from "@/backend/errors/AppError";
 import { BaseRepository, type OrderBy } from "./BaseRepository";
@@ -31,14 +32,16 @@ export class RawEventsRepository extends BaseRepository<RawEventRow> {
 
   /** Fingerprints already turned into transactions by any other import. */
   async knownFingerprints(userId: string, importId: string, fingerprints: string[]): Promise<Set<string>> {
-    if (fingerprints.length === 0) return new Set();
-    const result = await this.from()
-      .select("fingerprint")
-      .eq("user_id", userId)
-      .neq("import_id", importId)
-      .in("status", ["accepted", "linked"] satisfies RawEventStatus[])
-      .in("fingerprint", fingerprints);
-    return new Set((unwrap(result, "rawEvents.knownFingerprints") as Array<{ fingerprint: string }>).map((r) => r.fingerprint));
+    const rows = await inBatches(fingerprints, async (chunk) => {
+      const result = await this.from()
+        .select("fingerprint")
+        .eq("user_id", userId)
+        .neq("import_id", importId)
+        .in("status", ["accepted", "linked"] satisfies RawEventStatus[])
+        .in("fingerprint", chunk);
+      return unwrap(result, "rawEvents.knownFingerprints") as Array<{ fingerprint: string }>;
+    });
+    return new Set(rows.map((r) => r.fingerprint));
   }
 
   /** Bulk status/link update; rows are full records so this is a single upsert round-trip. */
