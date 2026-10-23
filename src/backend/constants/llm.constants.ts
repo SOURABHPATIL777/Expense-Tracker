@@ -8,7 +8,7 @@ import type { LlmTask } from "@/shared/constants/enums";
  */
 export const LLM = {
   /** On Ollama Cloud use names without the ":cloud" suffix; locally, any pulled model (e.g. "qwen3.5:9b"). */
-  MODEL: "glm-5.2",
+  MODEL: "glm-5.3-flash",
   /** Context window sent to Ollama (num_ctx); prompt data is truncated to fit. */
   MAX_INPUT_TOKENS: 16_000,
   /** Rough characters per token, used only to keep prompts inside MAX_INPUT_TOKENS. */
