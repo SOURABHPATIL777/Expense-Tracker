@@ -42,6 +42,11 @@
 }
 
 @media (max-width: 640px) {
+  /* Lighter shadows on phones: cheaper to paint while scrolling. */
+  .card {
+    box-shadow: var(--shadow-sm);
+  }
+
   .header {
     padding: var(--space-4) var(--space-4) var(--space-3);
   }

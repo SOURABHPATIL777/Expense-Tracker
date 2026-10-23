@@ -87,6 +87,7 @@ Node 20.9+ is required; Node 22+ is recommended.
    - Uploads, column mappings and "re-apply rules" start the worker right after the response, via `after()`.
    - Every signed-in API request also starts a short worker pass, at most once a minute per instance, unless a worker is already busy. This picks up retried or interrupted jobs.
    - `vercel.json` gives every API route 60 s, so a background pass always fits inside its function.
+   - `vercel.json` also pins functions to `icn1` (Seoul), next to the Supabase database (`ap-northeast-2`): every query is a ~2 ms hop instead of a trip across the Pacific. If you move the database, change this to the matching Vercel region (e.g. `bom1` for Supabase Mumbai).
 3. After deploying:
    - check `GET /api/v1/health` returns `ok`.
 4. **Use the production domain**, or turn off Vercel Authentication (Settings → Deployment Protection) for the URL you use. Protected preview/branch URLs (`…-git-main-….vercel.app`) redirect API calls to the Vercel login once that login expires; the app then says "Your session for this site has expired".

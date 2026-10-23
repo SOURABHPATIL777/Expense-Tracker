@@ -9,6 +9,7 @@ import { FormField } from "@/frontend/components/Form/FormField";
 import { Alert } from "@/frontend/components/Alert/Alert";
 import { ResendConfirmation } from "@/frontend/components/ResendConfirmation/ResendConfirmation";
 import { api } from "@/frontend/lib/apiClient";
+import { clearApiCache } from "@/frontend/hooks/useApi";
 import { safeNextPath } from "@/frontend/lib/safeRedirect";
 import { API_ROUTES, PAGE_ROUTES } from "@/shared/constants/routes";
 import { loginSchema, type LoginInput } from "@/shared/schemas/auth";
@@ -21,6 +22,7 @@ function LoginForm() {
 
   async function submit(values: LoginInput) {
     await api.post(API_ROUTES.auth.login, values);
+    clearApiCache();
     router.replace(safeNextPath(params.get("next")));
     router.refresh();
   }

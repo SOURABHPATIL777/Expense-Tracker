@@ -6,7 +6,7 @@ import { Suspense, useState, type ReactNode } from "react";
 import { cx } from "@/frontend/lib/cx";
 import { api } from "@/frontend/lib/apiClient";
 import { MORE_ITEMS, NAV_SECTIONS, TAB_ITEMS, type NavItem } from "@/frontend/lib/navigation";
-import { useApi } from "@/frontend/hooks/useApi";
+import { clearApiCache, useApi } from "@/frontend/hooks/useApi";
 import { Icon } from "@/frontend/components/Icon/Icon";
 import { Modal } from "@/frontend/components/Modal/Modal";
 import { Skeleton } from "@/frontend/components/Skeleton/Skeleton";
@@ -112,6 +112,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   async function logout() {
     await api.post(API_ROUTES.auth.logout).catch(() => undefined);
+    clearApiCache();
     router.replace(PAGE_ROUTES.login);
   }
 

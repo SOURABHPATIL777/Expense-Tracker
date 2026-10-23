@@ -1,4 +1,4 @@
-import { createClient, type RealtimeChannel, type SupabaseClient } from "@supabase/supabase-js";
+import type { RealtimeChannel, SupabaseClient } from "@supabase/supabase-js";
 import { api } from "@/frontend/lib/apiClient";
 import { API_ROUTES } from "@/shared/constants/routes";
 import type { RealtimeTokenDto } from "@/shared/schemas/auth";
@@ -51,7 +51,12 @@ class ImportEvents {
     try {
       const { data: token } = await api.get<RealtimeTokenDto>(API_ROUTES.auth.realtime);
       if (generation !== this.generation) return;
-      this.client ??= createClient(token.url, token.publishableKey, { auth: { persistSession: false, autoRefreshToken: false } });
+      // Loaded on first use, so the Supabase library isn't part of every page's initial download.
+      if (!this.client) {
+        const { createClient } = await import("@supabase/supabase-js");
+        if (generation !== this.generation) return;
+        this.client = createClient(token.url, token.publishableKey, { auth: { persistSession: false, autoRefreshToken: false } });
+      }
       await this.client.realtime.setAuth(token.accessToken);
       this.channel = this.client
         .channel(`imports:${token.userId}`)
