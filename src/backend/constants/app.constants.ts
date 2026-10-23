@@ -39,6 +39,28 @@ export const JOBS = {
   IMPORT_ROWS_PER_STEP: 500,
   CLASSIFY_PER_STEP: 50,
   LLM_BATCH_SIZE: 20,
+  /** Categorisation batches sent to the model at the same time. */
+  LLM_PARALLEL: 3,
+} as const;
+
+/**
+ * Words found in statement column headers. A row (or PDF line) with at least
+ * STATEMENT_TABLE.MIN_HEADER_CELLS such cells, and no dates or amounts, is a header row.
+ */
+export const STATEMENT_HEADER_WORDS = [
+  "date", "txn", "tran", "trans", "transaction", "value", "posting", "time",
+  "narration", "description", "particulars", "details", "remarks", "comment", "note",
+  "chq", "cheque", "ref", "reference", "utr", "rrn", "order",
+  "withdrawal", "withdrawals", "debit", "debits", "dr", "deposit", "deposits", "credit", "credits", "cr",
+  "amount", "balance", "type", "mode", "status", "upi", "account", "payee", "beneficiary",
+] as const;
+
+export const STATEMENT_TABLE = {
+  MIN_HEADER_CELLS: 3,
+  /** Fewer transaction rows than this and a file isn't treated as a statement. */
+  MIN_TRANSACTION_ROWS: 2,
+  /** A rebuilt PDF table needs at least this many dated records to be used. */
+  MIN_PDF_RECORDS: 3,
 } as const;
 
 /** Statement text that marks a credit as salary (matched on credits only, case-insensitive, whole words). */

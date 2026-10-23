@@ -15,12 +15,15 @@ import { TransactionsRepository, TransactionSourcesRepository } from "@/backend/
 import { ReviewItemsRepository, type NewReviewItem } from "@/backend/repositories/reviewItems.repository";
 import { AccountsRepository } from "@/backend/repositories/accounts.repository";
 import { UploadedFilesRepository } from "@/backend/repositories/uploadedFiles.repository";
-import type { ImportLayoutRow, ImportRow, RawEventRow, TransactionRow, TransactionSourceRow } from "@/backend/repositories/types";
-import { detectFormat, readerFor, readFile } from "@/backend/import/readers";
+import type { ExtractedText, ImportLayoutRow, ImportRow, RawEventRow, TransactionRow, TransactionSourceRow } from "@/backend/repositories/types";
+import { detectFormat, READER_LABELS, readerFor, readFile } from "@/backend/import/readers";
+import { splitSections } from "@/backend/import/sections";
+import { assertLooksLikeStatement } from "@/backend/import/statementCheck";
+import { looksLikeHeaderRow } from "@/backend/import/text";
 import { detectConfig, extract, findHeaderRow } from "@/backend/import/engine";
 import { istDate } from "@/backend/import/dates";
 import { headerSignature, textLayoutFingerprint } from "@/backend/import/text";
-import type { ExtractResult, ImportConfig, ParsedEvent, ReaderId, TableRead } from "@/backend/import/types";
+import type { ExtractedRow, ExtractResult, ImportConfig, ParsedEvent, ReaderId, TableRead } from "@/backend/import/types";
 import { fingerprintAll, sha256Hex } from "@/backend/domain/fingerprint";
 import { matchIncoming, type MatchCandidate } from "@/backend/domain/matcher";
 import { inferKind, paymentRail } from "@/backend/domain/inferKind";
@@ -36,6 +39,13 @@ const TEXT_LIMIT = 500;
 
 type Source = { sourceKind: SourceKind; sourceApp: SourceApp };
 type Detected = Source & { layoutId: string | null; label: string; readByAi: boolean; configId: string };
+
+/** Older imports stored the AI-read text as a plain array of lines. */
+const textOf = (row: ImportRow): ExtractedText | null =>
+  !row.extracted_text ? null : Array.isArray(row.extracted_text) ? { lines: row.extracted_text, columns: null } : row.extracted_text;
+
+/** The statement's column header among text lines (e.g. "Date Transaction Details Type Amount"). */
+const headerLine = (lines: readonly string[]) => lines.slice(0, 60).find((l) => looksLikeHeaderRow(l.split(/\s{2,}|\s(?=[A-Z])/))) ?? null;
 
 const fallbackSource = (kind: SourceKind | null): Source =>
   kind === "upi_app" ? { sourceKind: "upi_app", sourceApp: "other_upi" } : { sourceKind: "bank", sourceApp: "other_bank" };
@@ -91,7 +101,7 @@ export function importPipeline(db: Db, log: Logger) {
   /** Stores every extracted row as a raw event and moves the import on to processing. */
   async function saveExtracted(row: ImportRow, result: ExtractResult, d: Detected): Promise<ImportStatus> {
     const parsed = result.rows.filter((r) => r.parsed);
-    if (parsed.length === 0) return setStatus(row, "failed", "No transactions were found in this file.", "IMPORT_UNREADABLE");
+    if (parsed.length === 0) throw new AppError("NOT_A_STATEMENT");
     const fingerprints = fingerprintAll(d.sourceApp, parsed.map((r) => r.parsed!));
     let next = 0;
     const rawRows = result.rows.map((r) => ({
@@ -129,65 +139,158 @@ export function importPipeline(db: Db, log: Logger) {
   }
 
   /**
-   * Reads up to `maxChunks` chunks of a PDF's text with the LLM (one job step), appending verified
-   * rows. Returns `parsing` while chunks remain, `processing` once the whole file is read.
+   * Each table in the file (every sheet and section; PDF pages rebuilt as a table) is read with its
+   * own stored or AI-learned column mapping, one mapping per distinct header. Returns null when no
+   * section could be mapped (the caller falls back to the AI line reader, or fails).
+   */
+  async function readTableSections(
+    userId: string,
+    row: ImportRow,
+    table: TableRead,
+    formatLabel: string,
+    documentStart: readonly string[],
+  ): Promise<{ result: ExtractResult; detected: Detected } | null> {
+    type Mapping = { config: ImportConfig; detected: Detected };
+    const mappings = new Map<string, Mapping | null>();
+    const rows: ExtractedRow[] = [];
+    let first: Detected | null = null;
+    let usedAi = false;
+
+    for (const section of splitSections(table)) {
+      const key = section.signature || "__whole__";
+      if (!mappings.has(key)) mappings.set(key, await mapSection(userId, row, section.read, formatLabel, documentStart));
+      const mapping = mappings.get(key);
+      if (!mapping) continue;
+      first ??= mapping.detected;
+      usedAi ||= mapping.detected.readByAi;
+      // Row numbers point back at the original file, so they stay unique across sections.
+      for (const r of extract(section.read, mapping.config).rows) rows.push({ ...r, rowIndex: section.rowIndexes[r.rowIndex] ?? r.rowIndex });
+    }
+    if (!first) return null;
+    const days = rows.flatMap((r) => (r.parsed ? [istDate(r.parsed.occurredAt)] : [])).sort();
+    log.info({ importId: row.id, sections: mappings.size, rows: rows.length }, "table sections read");
+    return { result: { rows, periodStart: days[0] ?? null, periodEnd: days.at(-1) ?? null }, detected: { ...first, readByAi: usedAi } };
+  }
+
+  /** A stored layout for this table's header, else an AI-proposed mapping (proved, then stored). */
+  async function mapSection(
+    userId: string,
+    row: ImportRow,
+    read: TableRead,
+    formatLabel: string,
+    documentStart: readonly string[],
+  ): Promise<{ config: ImportConfig; detected: Detected } | null> {
+    const match = await matchLayout(read);
+    if (match && extract(read, match.config).rows.some((r) => r.parsed)) {
+      await layouts.touch(match.layout);
+      return {
+        config: match.config,
+        detected: {
+          sourceKind: match.layout.source_kind,
+          sourceApp: match.layout.source_app as SourceApp,
+          layoutId: match.layout.id,
+          label: match.layout.label,
+          readByAi: false,
+          configId: match.config.id,
+        },
+      };
+    }
+    try {
+      const mapped = await mapColumnsWithLlm(userId, row.file_name, read, formatLabel, documentStart);
+      const headerIdx = findHeaderRow(read.rows, mapped.config.table);
+      const learned = await layouts.save({
+        kind: "table",
+        signature: headerSignature(read.rows[headerIdx] ?? []),
+        label: mapped.config.label,
+        source_kind: mapped.sourceKind,
+        source_app: mapped.sourceApp,
+        config: mapped.config,
+      });
+      return {
+        config: mapped.config,
+        detected: { sourceKind: mapped.sourceKind, sourceApp: mapped.sourceApp, layoutId: learned.id, label: mapped.config.label, readByAi: true, configId: mapped.config.id },
+      };
+    } catch (err) {
+      // This table's columns couldn't be proved; other sections (or the AI line reader) may still work.
+      if (err instanceof AppError && err.code === "IMPORT_UNREADABLE") return null;
+      throw err;
+    }
+  }
+
+  /**
+   * Reads the next chunks of a file's text with the LLM (one job step): the first chunk alone
+   * (it also identifies the source and confirms it's a statement), then up to `maxChunks` at once
+   * in parallel. Verified rows are appended in chunk order. Returns `parsing` while chunks remain,
+   * `processing` once the whole file is read.
    */
   async function continuePdfRead(row: ImportRow, maxChunks: number): Promise<ImportStatus> {
-    const lines = row.extracted_text ?? [];
-    const chunks = chunkLines(lines);
+    const text = textOf(row) ?? { lines: [], columns: null };
+    const chunks = chunkLines(text.lines);
     let { cursor, row_count: total, skipped_count: skipped, period_start: periodStart, period_end: periodEnd } = row;
     let source: Source | null = row.source_app ? { sourceKind: row.source_kind!, sourceApp: row.source_app as SourceApp } : null;
-    const until = Math.min(chunks.length, cursor + maxChunks);
 
-    for (; cursor < until; cursor++) {
-      // Not enough time left in this step for a whole chunk: continue in the next step.
+    while (cursor < chunks.length && maxChunks > 0) {
+      // Not enough time left in this step for a call: continue in the next step.
       if (timeLeftMs() < LLM.MIN_CALL_MS + LLM.DEADLINE_MARGIN_MS) break;
-      const chunk = await readPdfChunkWithLlm(row.user_id, chunks[cursor], cursor === 0);
-      if (!source && chunk.source) source = chunk.source;
-      const app = source?.sourceApp ?? "other_bank";
-      const fps = fingerprintAll(app, chunk.events);
-      const parsedSoFar = total - skipped;
-      await rawEvents.appendForImport(
-        row.user_id,
-        chunk.events.map((e, i) => ({
-          import_id: row.id,
-          row_index: parsedSoFar + i,
-          raw: { chunk: cursor },
-          parsed: e,
-          fingerprint: fps[i],
-          status: "pending" as const,
-          error: null,
-          transaction_id: null,
-        })),
-      );
-      for (const e of chunk.events) {
-        const day = istDate(e.occurredAt);
-        if (!periodStart || day < periodStart) periodStart = day;
-        if (!periodEnd || day > periodEnd) periodEnd = day;
+      const batch = cursor === 0 ? [0] : Array.from({ length: Math.min(maxChunks, chunks.length - cursor) }, (_, i) => cursor + i);
+      const settled = await Promise.allSettled(batch.map((i) => readPdfChunkWithLlm(row.user_id, chunks[i], i === 0, text.columns)));
+
+      // Keep every chunk up to the first failure, in order; the failed one is retried next time.
+      let failure: unknown = null;
+      for (const [n, outcome] of settled.entries()) {
+        if (outcome.status === "rejected") {
+          failure = outcome.reason;
+          break;
+        }
+        const chunk = outcome.value;
+        if (!source && chunk.source) source = chunk.source;
+        const fps = fingerprintAll(source?.sourceApp ?? "other_bank", chunk.events);
+        const parsedSoFar = total - skipped;
+        await rawEvents.appendForImport(
+          row.user_id,
+          chunk.events.map((e, i) => ({
+            import_id: row.id,
+            row_index: parsedSoFar + i,
+            raw: { chunk: batch[n] },
+            parsed: e,
+            fingerprint: fps[i],
+            status: "pending" as const,
+            error: null,
+            transaction_id: null,
+          })),
+        );
+        for (const e of chunk.events) {
+          const day = istDate(e.occurredAt);
+          if (!periodStart || day < periodStart) periodStart = day;
+          if (!periodEnd || day > periodEnd) periodEnd = day;
+        }
+        total += chunk.events.length + chunk.dropped;
+        skipped += chunk.dropped;
+        cursor = batch[n] + 1;
       }
-      total += chunk.events.length + chunk.dropped;
-      skipped += chunk.dropped;
       row = await imports.update(row.user_id, row.id, {
-        cursor: cursor + 1,
+        cursor,
         row_count: total,
         skipped_count: skipped,
         period_start: periodStart,
         period_end: periodEnd,
         ...(source && { source_kind: source.sourceKind, source_app: source.sourceApp }),
       });
+      if (failure) throw failure;
+      if (batch.length > 1 || cursor > 1) break; // one parallel batch per step
     }
     if (cursor < chunks.length) return "parsing";
 
     if (total - skipped === 0) {
       await imports.update(row.user_id, row.id, { extracted_text: null });
-      return setStatus(row, "failed", "No transactions could be read from this PDF.", "IMPORT_UNREADABLE");
+      throw new AppError("NOT_A_STATEMENT");
     }
     const final = source ?? fallbackSource(row.source_kind);
     const label = `${SOURCE_APP_LABELS[final.sourceApp]} statement (read by AI)`;
     // Remember this statement layout's source (hash of its header lines only, never the text).
     const layout = await layouts.save({
       kind: "llm_extract",
-      signature: textLayoutFingerprint(lines),
+      signature: textLayoutFingerprint(text.lines),
       label,
       source_kind: final.sourceKind,
       source_app: final.sourceApp,
@@ -203,7 +306,7 @@ export function importPipeline(db: Db, log: Logger) {
       detected_label: label,
       account_id: await autoAccount(row, final.sourceApp),
     });
-    log.info({ importId: row.id, rows: total - skipped, dropped: skipped }, "pdf read by AI");
+    log.info({ importId: row.id, rows: total - skipped, dropped: skipped }, "read by AI");
     return "processing";
   }
 
@@ -220,51 +323,29 @@ export function importPipeline(db: Db, log: Logger) {
 
       const { buffer, reader } = await loadFile(row);
       const read = await readFile(reader, buffer, opts.password);
+      // Cheap gate before any AI call: a statement has rows with dates and amounts.
+      assertLooksLikeStatement(read);
 
-      const match = read.kind === "table" ? await matchLayout(read) : null;
-      if (match && read.kind === "table") {
-        const result = extract(read, match.config);
-        if (result.rows.some((r) => r.parsed)) {
-          await layouts.touch(match.layout);
-          return await saveExtracted(row, result, {
-            sourceKind: match.layout.source_kind,
-            sourceApp: match.layout.source_app as SourceApp,
-            layoutId: match.layout.id,
-            label: match.layout.label,
-            readByAi: match.layout.origin === "llm",
-            configId: match.config.id,
-          });
-        }
-        // The header matched but nothing parsed: let the LLM look at it fresh.
+      // Tables first (CSV/Excel, HTML tables, JSON records, PDFs laid out as tables): every sheet
+      // and section, each with a stored or AI-learned column mapping.
+      const table = read.kind === "table" ? read : read.table;
+      if (table) {
+        // The top of the document (bank name, account header) identifies the bank or app.
+        const documentStart = read.kind === "text" ? read.lines : table.rows.map((r) => r.filter(Boolean).join(" "));
+        const sections = await readTableSections(userId, row, table, READER_LABELS[reader], documentStart);
+        if (sections) return await saveExtracted(row, sections.result, sections.detected);
       }
-
       if (read.kind === "table") {
-        const mapped = await mapColumnsWithLlm(userId, row.file_name, read);
-        const headerIdx = findHeaderRow(read.rows, mapped.config.table);
-        const learned = await layouts.save({
-          kind: "table",
-          signature: headerSignature(read.rows[headerIdx] ?? []),
-          label: mapped.config.label,
-          source_kind: mapped.sourceKind,
-          source_app: mapped.sourceApp,
-          config: mapped.config,
-        });
-        return await saveExtracted(row, extract(read, mapped.config), {
-          sourceKind: mapped.sourceKind,
-          sourceApp: mapped.sourceApp,
-          layoutId: learned.id,
-          label: mapped.config.label,
-          readByAi: true,
-          configId: mapped.config.id,
-        });
+        throw new AppError("IMPORT_UNREADABLE", { message: "We couldn't work out this file's columns. Try exporting it again, or as a different format." });
       }
 
-      // PDFs are always read by the LLM: keep the text for the duration of the read, chunk by chunk.
-      // A layout seen before tells us the source up front.
+      // Not a table (or its columns couldn't be proved): the AI reads the text in chunks. A
+      // layout seen before tells us the source up front; the header line guides every chunk.
       const known = await layouts.find("llm_extract", textLayoutFingerprint(read.lines));
+      const columns = table ? table.rows.find((r) => looksLikeHeaderRow(r))?.join(" | ") ?? headerLine(read.lines) : headerLine(read.lines);
       await rawEvents.replaceForImport(userId, importId, []);
       row = await imports.update(userId, importId, {
-        extracted_text: read.lines,
+        extracted_text: { lines: read.lines, columns },
         cursor: 0,
         row_count: 0,
         skipped_count: 0,

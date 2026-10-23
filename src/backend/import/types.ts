@@ -8,12 +8,16 @@ import type { Direction, SourceApp, SourceKind, TransactionStatus } from "@/back
 /** Spreadsheet-like data (CSV, XLS/XLSX). Every cell is a string; XLS dates become `yyyy-MM-dd HH:mm:ss`. */
 export type TableRead = { kind: "table"; rows: string[][] };
 
-/** Text extracted from a PDF, one visual line per entry. */
-export type TextRead = { kind: "text"; lines: string[] };
+/**
+ * Text (PDF, HTML page, JSON records), one visual line per entry, for the AI reader. `table` is
+ * set when the file's layout could also be rebuilt as a table (columns from its header), which is
+ * tried first.
+ */
+export type TextRead = { kind: "text"; lines: string[]; table?: TableRead };
 
 export type ReadResult = TableRead | TextRead;
 
-export type ReaderId = "csv" | "xlsx" | "pdf_text";
+export type ReaderId = "csv" | "xlsx" | "pdf_text" | "html" | "json";
 
 /** Table layouts read CSV and Excel alike; PDFs are read by the LLM (llm/pdfExtraction.ts). */
 export type ConfigReader = "table";

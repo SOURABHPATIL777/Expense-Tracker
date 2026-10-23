@@ -73,7 +73,8 @@ export async function runLlmTask<S extends ZodType>(opts: RunOptions<S>): Promis
       maxOutputTokens: settings.maxOutputTokens,
       maxRetries: LLM.MAX_RETRIES,
       abortSignal: AbortSignal.timeout(timeoutMs),
-      providerOptions: { ollama: { options: { num_ctx: LLM.MAX_INPUT_TOKENS } } },
+      // Thinking off: reasoning tokens would count against maxOutputTokens and slow every call.
+      providerOptions: { ollama: { think: LLM.THINK, options: { num_ctx: LLM.MAX_INPUT_TOKENS } } },
     });
     await recordAgentRun({
       ...base,

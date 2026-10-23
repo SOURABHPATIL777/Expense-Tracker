@@ -46,6 +46,18 @@ export const BANKS = [
   "uco",
   "bom",
   "psb",
+  "axis",
+  "kotak",
+  "yes",
+  "idfc",
+  "indusind",
+  "au",
+  "federal",
+  "rbl",
+  "idbi",
+  "bandhan",
+  "hsbc",
+  "sc",
   "other_bank",
 ] as const;
 export type Bank = (typeof BANKS)[number];

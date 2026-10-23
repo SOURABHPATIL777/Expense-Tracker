@@ -1,5 +1,6 @@
 import "server-only";
 import { createHash } from "node:crypto";
+import { STATEMENT_HEADER_WORDS, STATEMENT_TABLE } from "@/backend/constants/app.constants";
 
 /** Lower-case, collapse whitespace, strip punctuation: "Withdrawal Amt. (INR)" → "withdrawal amt inr". */
 export function normalizeHeader(value: string): string {
@@ -15,12 +16,23 @@ export function cleanCell(value: unknown): string {
 }
 
 const DATE_LIKE = /^(\d{1,4}[/.-]\d{1,2}[/.-]\d{2,4}|\d{1,2}[ -][a-z]{3,9}[ -,]+\d{2,4}|[a-z]{3,9} \d{1,2},? \d{4})\b/i;
-const AMOUNT_LIKE = /^[+-]?\s*(₹|rs\.?|inr)?\s*\d[\d,]*(\.\d{1,2})?\s*(dr|cr)?$/i;
+const AMOUNT_LIKE = /^[+-]?\s*(₹|rs\.?|inr)?\s*(\d[\d,]*(\.\d{1,2})?|\.\d{1,2})\s*(dr|cr)?$/i;
+const HEADER_WORD = new RegExp(`\\b(${STATEMENT_HEADER_WORDS.join("|")})\\b`, "i");
+
+export const isDateLike = (text: string) => DATE_LIKE.test(text.trim());
+export const isAmountLike = (text: string) => AMOUNT_LIKE.test(text.trim());
 
 /** A row that could be a transaction: it has a date-like cell and a separate amount-like cell. */
 export function looksLikeTransactionRow(cells: readonly string[]): boolean {
-  const date = cells.findIndex((c) => DATE_LIKE.test(c));
-  return date >= 0 && cells.some((c, i) => i !== date && AMOUNT_LIKE.test(c));
+  const date = cells.findIndex(isDateLike);
+  return date >= 0 && cells.some((c, i) => i !== date && isAmountLike(c));
+}
+
+/** A column-header row: several header words ("Date", "Narration", "Debit", …) and no values. */
+export function looksLikeHeaderRow(cells: readonly string[]): boolean {
+  const filled = cells.map((c) => c.trim()).filter(Boolean);
+  if (filled.some((c) => isDateLike(c) || isAmountLike(c))) return false;
+  return filled.filter((c) => c.length <= 60 && HEADER_WORD.test(normalizeHeader(c))).length >= STATEMENT_TABLE.MIN_HEADER_CELLS;
 }
 
 /** Signature of a header row used to recognise a saved template next time. */

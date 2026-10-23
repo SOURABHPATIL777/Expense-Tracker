@@ -11,6 +11,8 @@ export const FILE_FORMATS = {
     mimeTypes: ["application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
   },
   pdf: { label: "PDF", extensions: [".pdf"], mimeTypes: ["application/pdf"] },
+  html: { label: "HTML", extensions: [".html", ".htm"], mimeTypes: ["text/html"] },
+  json: { label: "JSON", extensions: [".json"], mimeTypes: ["application/json", "text/plain"] },
 } as const;
 
 export type FileFormat = keyof typeof FILE_FORMATS;
@@ -66,6 +68,18 @@ export const SOURCE_CONFIG: Record<SourceApp, SourceConfig> = {
   uco: bank("UCO mBanking → Account statement → Download."),
   bom: bank("Mahamobile → Account statement → Download."),
   psb: bank("PSB UnIC → Account statement → Download."),
+  axis: bank("Axis Mobile / internet banking → Accounts → Statement → choose period → Download (PDF/Excel)."),
+  kotak: bank("Kotak811 / net banking → Account statement → choose period → Download (PDF/Excel)."),
+  yes: bank("YES Mobile / net banking → Accounts → Statement → Download."),
+  idfc: bank("IDFC FIRST app → Account → Statements → Download."),
+  indusind: bank("IndusMobile / net banking → Account statement → Download."),
+  au: bank("AU 0101 app / net banking → Account statement → Download."),
+  federal: bank("FedMobile / FedNet → Account statement → Download."),
+  rbl: bank("RBL MoBank / net banking → Account statement → Download."),
+  idbi: bank("IDBI GO Mobile+ / net banking → Account statement → Download."),
+  bandhan: bank("mBandhan / net banking → Account statement → Download."),
+  hsbc: bank("HSBC India app / net banking → Statements → Download (text PDF, not a scanned copy)."),
+  sc: bank("SC Mobile / online banking → e-Statements → Download."),
   other_bank: bank("Download your account statement from net banking or the bank's app."),
 };
 

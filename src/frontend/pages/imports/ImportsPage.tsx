@@ -146,7 +146,7 @@ export default function ImportsPage() {
         <div className={styles.stack}>
           <Card>
             <div className={styles.stack}>
-              <FileDropzone onFiles={onFiles} hint="CSV, Excel or PDF · up to 10 MB each · pick several at once" />
+              <FileDropzone onFiles={onFiles} hint="CSV, Excel, PDF, HTML or JSON · up to 10 MB each · pick several at once" />
               <ul className={styles.sources} aria-label="Supported sources">
                 {SOURCES.map((s) => (
                   <li key={s}>{s}</li>

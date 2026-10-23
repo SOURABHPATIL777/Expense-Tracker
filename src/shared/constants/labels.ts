@@ -100,6 +100,18 @@ export const SOURCE_APP_LABELS: Record<SourceApp, string> = {
   uco: "UCO Bank",
   bom: "Bank of Maharashtra",
   psb: "Punjab & Sind Bank",
+  axis: "Axis Bank",
+  kotak: "Kotak Mahindra Bank",
+  yes: "Yes Bank",
+  idfc: "IDFC FIRST Bank",
+  indusind: "IndusInd Bank",
+  au: "AU Small Finance Bank",
+  federal: "Federal Bank",
+  rbl: "RBL Bank",
+  idbi: "IDBI Bank",
+  bandhan: "Bandhan Bank",
+  hsbc: "HSBC India",
+  sc: "Standard Chartered",
   other_bank: "Other bank",
 };
 

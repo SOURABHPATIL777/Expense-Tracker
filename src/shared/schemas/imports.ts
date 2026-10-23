@@ -4,7 +4,7 @@ import { UPLOAD } from "../constants/limits";
 import { ALL_FORMATS, FILE_FORMATS, formatForFileName } from "../constants/sources";
 import { paginationQuerySchema } from "./common";
 
-/** Any CSV, Excel or PDF statement; the bank or UPI app is detected after upload. */
+/** Any CSV, Excel, PDF, HTML or JSON statement; the bank or UPI app is detected after upload. */
 export const createImportSchema = z
   .object({
     fileName: z.string().trim().min(1).max(255),

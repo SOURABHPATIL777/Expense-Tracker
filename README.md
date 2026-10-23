@@ -13,7 +13,7 @@ Track spending from **PhonePe, Google Pay and Paytm** (plus bank statements) and
 
 | Area | Details |
 | --- | --- |
-| Import | Drop any CSV, Excel or PDF statement and it's imported automatically. The bank or UPI app and the layout are recognised from **stored layouts shared by all users**. If none matches, AI works out the columns (proved on the file, then saved for everyone) or reads the PDF's rows (each kept only if its date and amount appear verbatim). PDF passwords are used once and never stored. |
+| Import | Drop any CSV, Excel, PDF, HTML or JSON statement (several at once) and it's imported automatically. Every sheet, section and page is read. Tables, including PDFs laid out as tables, rebuilt from text positions, are matched against **stored layouts shared by all users**. Otherwise AI works out the columns once per header (proved on the file, then saved for everyone). Statements that aren't tables are read by AI in parallel chunks, each row kept only if its date and amount appear verbatim. Files that don't look like statements are rejected. PDF passwords are used once and never stored. |
 | Reconciliation | The same payment from the app and the bank is matched by UTR into one transaction. Amount + time near-matches go to review and are never merged automatically. Re-imports are deduplicated. |
 | Classification | Order: your rules → own transfers/refunds/card bills from the statement → **category map** (your own corrections first, then the longest shared keyword, e.g. `indmoney credit card repayment` beats `indmoney`) → payments to people = **Individual** (never stored in the map) → AI for anything left, whose keywords join the shared map. Anything you edit is locked and remembered for that merchant. |
 | Dashboard | Personal spending · all money out · paid for others · own transfers · income · refunds · owed to you · money expected back, plus categories and data completeness. |
@@ -149,9 +149,11 @@ the **Individual** category.
 ## Stored layouts: verification status
 
 Layouts are learned by AI and proved on the file that taught them (at least 90% of its rows must
-parse). PDFs are always read by AI; their stored layout only records the source, keyed by a hash of
-the statement's header lines. All layouts are `verified = false` until checked against a real
-anonymised export:
+parse). Text PDFs laid out as tables are rebuilt into rows and columns from the header on page 1 (or
+wherever the table starts), so they use the same table layouts as CSV/Excel. PDFs that aren't tables
+are read by AI; their stored layout only records the source, keyed by a hash of the statement's
+header lines. Scanned (image-only) PDFs aren't supported. All layouts are `verified = false` until
+checked against a real anonymised export:
 
 1. Add the export under `tests/fixtures/real/` with a test next to `tests/unit/import/engine.test.ts`.
 2. Set `verified = true` on its `import_layouts` row.

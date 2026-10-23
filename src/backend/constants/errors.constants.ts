@@ -16,6 +16,10 @@ export const ERRORS = {
   UNSUPPORTED_FILE: { status: 415, message: "This file type is not supported." },
   VALIDATION: { status: 422, message: "Some fields are invalid." },
   IMPORT_UNREADABLE: { status: 422, message: "We could not read this file." },
+  NOT_A_STATEMENT: {
+    status: 422,
+    message: "This file doesn't look like a bank or UPI statement. Upload the statement you downloaded from your bank or UPI app.",
+  },
   PASSWORD_REQUIRED: { status: 422, message: "This file is password protected." },
   LLM_DISABLED: { status: 409, message: "AI isn't available for this right now." },
   RATE_LIMITED: { status: 429, message: "Too many requests. Please slow down." },

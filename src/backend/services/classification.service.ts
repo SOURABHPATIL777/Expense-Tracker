@@ -6,31 +6,70 @@ import { JOBS, SALARY_HINT } from "@/backend/constants/app.constants";
 import { LLM_CONFIDENCE_THRESHOLD } from "@/backend/constants/llm.constants";
 import type { TransactionKind } from "@/backend/constants/enums.constants";
 import { TABLES } from "@/backend/constants/db.constants";
-import { CategoriesRepository, RulesRepository } from "@/backend/repositories/categorization.repository";
+import {
+  CategoriesRepository,
+  RulesRepository,
+} from "@/backend/repositories/categorization.repository";
 import { CategoryKeywordsRepository } from "@/backend/repositories/categoryKeywords.repository";
 import { TransactionsRepository } from "@/backend/repositories/transactions.repository";
-import { ReviewItemsRepository, type NewReviewItem } from "@/backend/repositories/reviewItems.repository";
-import type { CategoryRow, RuleRow, TransactionRow } from "@/backend/repositories/types";
+import {
+  ReviewItemsRepository,
+  type NewReviewItem,
+} from "@/backend/repositories/reviewItems.repository";
+import type {
+  CategoryRow,
+  RuleRow,
+  TransactionRow,
+} from "@/backend/repositories/types";
 import { firstMatchingRule, type Rule } from "@/backend/domain/rules";
-import { keywordAppearsIn, matchCategory, normalizeKeyword, resolveCategory } from "@/backend/domain/categoryMap";
+import {
+  keywordAppearsIn,
+  matchCategory,
+  normalizeKeyword,
+  resolveCategory,
+} from "@/backend/domain/categoryMap";
 import { looksLikeIndividual } from "@/backend/domain/individual";
-import { looksLikeSalary, similarEarlierCredits } from "@/backend/domain/salary";
+import {
+  looksLikeSalary,
+  similarEarlierCredits,
+} from "@/backend/domain/salary";
 import { counterpartyKey } from "@/backend/domain/counterparty";
 import { rememberCounterparty } from "./counterpartyRules.service";
 import { llmTaskEnabled, runLlmTask } from "@/backend/llm/run";
-import { CATEGORIZE_INSTRUCTIONS, categorizeData, categorizeSchema } from "@/backend/llm/prompts/categorize";
+import { mapLimit } from "@/backend/llm/concurrency";
+import {
+  CATEGORIZE_INSTRUCTIONS,
+  categorizeData,
+  categorizeSchema,
+} from "@/backend/llm/prompts/categorize";
 
 /** Decided from the statement itself at import time; rules may override, the map and LLM may not. */
-const DETERMINISTIC_KINDS = new Set<TransactionKind>(["self_transfer", "refund", "reversal", "cc_bill_payment"]);
+const DETERMINISTIC_KINDS = new Set<TransactionKind>([
+  "self_transfer",
+  "refund",
+  "reversal",
+  "cc_bill_payment",
+]);
 
 /** Catalog name of the default category for person-to-person payments. */
 export const INDIVIDUAL_CATEGORY = "Individual";
 /** Catalog name of the salary category. */
 export const SALARY_CATEGORY = "Salary";
 
-export type ClassifyScope = { scope: "import"; importId: string; cursor?: string } | { scope: "all"; cursor?: string };
+export type ClassifyScope =
+  | { scope: "import"; importId: string; cursor?: string }
+  | { scope: "all"; cursor?: string };
 
-type Patch = Partial<Pick<TransactionRow, "category_id" | "category_source" | "category_confidence" | "transaction_kind" | "review_status">>;
+type Patch = Partial<
+  Pick<
+    TransactionRow,
+    | "category_id"
+    | "category_source"
+    | "category_confidence"
+    | "transaction_kind"
+    | "review_status"
+  >
+>;
 
 const toRule = (r: RuleRow): Rule => ({
   id: r.id,
@@ -44,23 +83,36 @@ const toRule = (r: RuleRow): Rule => ({
 });
 
 /** The text a keyword can match: merchant, raw merchant, narration and UPI handle. */
-export const matchTexts = (t: Pick<TransactionRow, "merchant_normalized" | "merchant_raw" | "narration" | "counterparty_vpa">) => [
-  t.merchant_normalized,
-  t.merchant_raw,
-  t.narration,
-  t.counterparty_vpa,
-];
+export const matchTexts = (
+  t: Pick<
+    TransactionRow,
+    "merchant_normalized" | "merchant_raw" | "narration" | "counterparty_vpa"
+  >,
+) => [t.merchant_normalized, t.merchant_raw, t.narration, t.counterparty_vpa];
 
 /** Debits default to spending; credits stay `unknown` (a friend repaying is not income) until decided. */
 const defaultKind = (t: TransactionRow): TransactionKind =>
-  t.transaction_kind !== "unknown" ? t.transaction_kind : t.direction === "debit" ? "expense" : "unknown";
+  t.transaction_kind !== "unknown"
+    ? t.transaction_kind
+    : t.direction === "debit"
+      ? "expense"
+      : "unknown";
 
 /** A category's kind hint applies only when it agrees with the money's direction. */
-function kindFor(t: TransactionRow, category: CategoryRow | undefined, explicit?: TransactionKind | null): TransactionKind {
+function kindFor(
+  t: TransactionRow,
+  category: CategoryRow | undefined,
+  explicit?: TransactionKind | null,
+): TransactionKind {
   if (explicit) return explicit;
   if (DETERMINISTIC_KINDS.has(t.transaction_kind)) return t.transaction_kind;
   const hint = category?.kind_hint;
-  if (!hint || (hint === "expense" && t.direction === "credit") || (hint === "income" && t.direction === "debit")) return defaultKind(t);
+  if (
+    !hint ||
+    (hint === "expense" && t.direction === "credit") ||
+    (hint === "income" && t.direction === "debit")
+  )
+    return defaultKind(t);
   return hint;
 }
 
@@ -80,23 +132,45 @@ export function classificationService(db: Db, log: Logger) {
   const reviews = new ReviewItemsRepository(db);
 
   /** Next keyset page of transactions to classify for a scope. */
-  async function nextBatch(userId: string, s: ClassifyScope): Promise<{ rows: TransactionRow[]; cursor: string | null }> {
+  async function nextBatch(
+    userId: string,
+    s: ClassifyScope,
+  ): Promise<{ rows: TransactionRow[]; cursor: string | null }> {
     const limit = JOBS.CLASSIFY_PER_STEP;
     let ids: string[];
     if (s.scope === "import") {
-      let q = db.from(TABLES.TRANSACTION_SOURCES).select("transaction_id").eq("user_id", userId).eq("import_id", s.importId);
+      let q = db
+        .from(TABLES.TRANSACTION_SOURCES)
+        .select("transaction_id")
+        .eq("user_id", userId)
+        .eq("import_id", s.importId);
       if (s.cursor) q = q.gt("transaction_id", s.cursor);
-      ids = (unwrap(await q.order("transaction_id").limit(limit), "classify.importIds") as Array<{ transaction_id: string }>).map((r) => r.transaction_id);
+      ids = (
+        unwrap(
+          await q.order("transaction_id").limit(limit),
+          "classify.importIds",
+        ) as Array<{ transaction_id: string }>
+      ).map((r) => r.transaction_id);
     } else {
-      let q = db.from(TABLES.TRANSACTIONS).select("id").eq("user_id", userId).eq("user_locked", false);
+      let q = db
+        .from(TABLES.TRANSACTIONS)
+        .select("id")
+        .eq("user_id", userId)
+        .eq("user_locked", false);
       if (s.cursor) q = q.gt("id", s.cursor);
-      ids = (unwrap(await q.order("id").limit(limit), "classify.allIds") as Array<{ id: string }>).map((r) => r.id);
+      ids = (
+        unwrap(await q.order("id").limit(limit), "classify.allIds") as Array<{
+          id: string;
+        }>
+      ).map((r) => r.id);
     }
     if (ids.length === 0) return { rows: [], cursor: null };
     const rows = await transactions.listAll(userId, (q) => {
       const base = q.in("id", ids).eq("user_locked", false);
       // An import pass only fills gaps; a full pass (after rule changes) redoes everything the user didn't set.
-      return s.scope === "import" ? base.is("category_id", null) : base.or("category_source.is.null,category_source.neq.user");
+      return s.scope === "import"
+        ? base.is("category_id", null)
+        : base.or("category_source.is.null,category_source.neq.user");
     });
     return { rows, cursor: ids.length === limit ? ids.at(-1)! : null };
   }
@@ -104,12 +178,37 @@ export function classificationService(db: Db, log: Logger) {
   /** The user's recent credits from the payers in `rows`, for the "repeats monthly" salary hint. */
   async function creditHistory(userId: string, rows: TransactionRow[]) {
     const credits = rows.filter((t) => t.direction === "credit");
-    const vpas = [...new Set(credits.map((t) => t.counterparty_vpa).filter((v): v is string => Boolean(v)))];
-    const names = [...new Set(credits.filter((t) => !t.counterparty_vpa).map((t) => t.merchant_normalized).filter((v): v is string => Boolean(v)))];
+    const vpas = [
+      ...new Set(
+        credits
+          .map((t) => t.counterparty_vpa)
+          .filter((v): v is string => Boolean(v)),
+      ),
+    ];
+    const names = [
+      ...new Set(
+        credits
+          .filter((t) => !t.counterparty_vpa)
+          .map((t) => t.merchant_normalized)
+          .filter((v): v is string => Boolean(v)),
+      ),
+    ];
     if (!vpas.length && !names.length) return [];
-    const since = new Date(Date.now() - SALARY_HINT.LOOKBACK_DAYS * 86_400_000).toISOString();
-    const filters = [vpas.length && `counterparty_vpa.in.(${vpas.map((v) => JSON.stringify(v)).join(",")})`, names.length && `merchant_normalized.in.(${names.map((v) => JSON.stringify(v)).join(",")})`].filter(Boolean);
-    return transactions.listAll(userId, (q) => q.eq("direction", "credit").gte("occurred_at", since).or(filters.join(",")));
+    const since = new Date(
+      Date.now() - SALARY_HINT.LOOKBACK_DAYS * 86_400_000,
+    ).toISOString();
+    const filters = [
+      vpas.length &&
+        `counterparty_vpa.in.(${vpas.map((v) => JSON.stringify(v)).join(",")})`,
+      names.length &&
+        `merchant_normalized.in.(${names.map((v) => JSON.stringify(v)).join(",")})`,
+    ].filter(Boolean);
+    return transactions.listAll(userId, (q) =>
+      q
+        .eq("direction", "credit")
+        .gte("occurred_at", since)
+        .or(filters.join(",")),
+    );
   }
 
   async function llmPass(
@@ -126,13 +225,28 @@ export function classificationService(db: Db, log: Logger) {
     const names = categories.map((c) => c.name);
     const schema = categorizeSchema(names as [string, ...string[]]);
     const byName = new Map(categories.map((c) => [c.name, c]));
-    const shared = new Map<string, { keyword: string; defaultCategoryId: string; transactionKind: TransactionKind | null }>();
-    const own = new Map<string, { categoryId: string; transactionKind: TransactionKind | null }>();
+    const shared = new Map<
+      string,
+      {
+        keyword: string;
+        defaultCategoryId: string;
+        transactionKind: TransactionKind | null;
+      }
+    >();
+    const own = new Map<
+      string,
+      { categoryId: string; transactionKind: TransactionKind | null }
+    >();
 
     const history = await creditHistory(userId, pending);
-    for (let i = 0; i < pending.length; i += JOBS.LLM_BATCH_SIZE) {
-      const batch = pending.slice(i, i + JOBS.LLM_BATCH_SIZE);
-      const out = await runLlmTask({
+    const batches = Array.from(
+      { length: Math.ceil(pending.length / JOBS.LLM_BATCH_SIZE) },
+      (_, i) =>
+        pending.slice(i * JOBS.LLM_BATCH_SIZE, (i + 1) * JOBS.LLM_BATCH_SIZE),
+    );
+    // Batches go to the model a few at a time; their answers are applied in order afterwards.
+    const outputs = await mapLimit(batches, JOBS.LLM_PARALLEL, (batch) =>
+      runLlmTask({
         userId,
         task: "categorize",
         schema,
@@ -150,14 +264,28 @@ export function classificationService(db: Db, log: Logger) {
             similarCreditsLast3Months: similarEarlierCredits(t, history),
           })),
         ),
-      });
+      }),
+    );
+    for (const [b, out] of outputs.entries()) {
+      const batch = batches[b];
       for (const item of out.items) {
         const t = batch[item.index];
         if (!t) continue; // the model referenced an index we never sent
-        const isSalary = item.isSalary && !item.isIndividual && t.direction === "credit";
-        const category = isSalary ? (salary ?? byName.get(item.category ?? "")) : item.isIndividual ? individual : item.category ? byName.get(item.category) : undefined;
+        const isSalary =
+          item.isSalary && !item.isIndividual && t.direction === "credit";
+        const category = isSalary
+          ? (salary ?? byName.get(item.category ?? ""))
+          : item.isIndividual
+            ? individual
+            : item.category
+              ? byName.get(item.category)
+              : undefined;
         const lowConfidence = item.confidence < LLM_CONFIDENCE_THRESHOLD;
-        const explicitKind = isSalary ? "income" : item.kind === "unknown" || item.isIndividual ? null : item.kind;
+        const explicitKind = isSalary
+          ? "income"
+          : item.kind === "unknown" || item.isIndividual
+            ? null
+            : item.kind;
         patches.set(t.id, {
           category_id: category?.id ?? null,
           category_source: category ? "llm" : null,
@@ -166,7 +294,14 @@ export function classificationService(db: Db, log: Logger) {
           review_status: lowConfidence ? "needs_review" : t.review_status,
         });
         if (lowConfidence) {
-          reviewItems.push({ kind: "low_confidence_category", transaction_id: t.id, payload: { suggestedCategoryId: category?.id ?? null, confidence: item.confidence } });
+          reviewItems.push({
+            kind: "low_confidence_category",
+            transaction_id: t.id,
+            payload: {
+              suggestedCategoryId: category?.id ?? null,
+              confidence: item.confidence,
+            },
+          });
           continue;
         }
         if (isSalary) {
@@ -176,53 +311,116 @@ export function classificationService(db: Db, log: Logger) {
         // Only a confident, business keyword that really appears in the text is shared with everyone,
         // and only from payments: who pays a user (an employer, a friend) says nothing about others.
         const keyword = normalizeKeyword(item.keyword);
-        if (t.direction !== "debit" || item.isIndividual || !category || !keyword || !keywordAppearsIn(matchTexts(t), keyword)) continue;
-        if (category.default_category_id) shared.set(keyword, { keyword, defaultCategoryId: category.default_category_id, transactionKind: explicitKind });
-        else own.set(keyword, { categoryId: category.id, transactionKind: explicitKind });
+        if (
+          t.direction !== "debit" ||
+          item.isIndividual ||
+          !category ||
+          !keyword ||
+          !keywordAppearsIn(matchTexts(t), keyword)
+        )
+          continue;
+        if (category.default_category_id)
+          shared.set(keyword, {
+            keyword,
+            defaultCategoryId: category.default_category_id,
+            transactionKind: explicitKind,
+          });
+        else
+          own.set(keyword, {
+            categoryId: category.id,
+            transactionKind: explicitKind,
+          });
       }
     }
-    for (const [keyword, e] of own) await keywords.learnForUser(userId, keyword, e.categoryId, e.transactionKind, "llm");
-    if (shared.size || own.size) log.info({ shared: await keywords.learnShared([...shared.values()]), own: own.size }, "category keywords learned");
+    for (const [keyword, e] of own)
+      await keywords.learnForUser(
+        userId,
+        keyword,
+        e.categoryId,
+        e.transactionKind,
+        "llm",
+      );
+    if (shared.size || own.size)
+      log.info(
+        {
+          shared: await keywords.learnShared([...shared.values()]),
+          own: own.size,
+        },
+        "category keywords learned",
+      );
   }
 
   /** Classifies one batch; returns the cursor for the next batch, or null when the scope is done. */
-  async function classifyStep(userId: string, scope: ClassifyScope): Promise<string | null> {
+  async function classifyStep(
+    userId: string,
+    scope: ClassifyScope,
+  ): Promise<string | null> {
     const { rows, cursor } = await nextBatch(userId, scope);
     if (rows.length === 0) return cursor;
 
-    const [categories, rules, entries, individualId, salaryId] = await Promise.all([
-      categoriesRepo.listAll(userId),
-      rulesRepo.listActive(userId),
-      keywords.entriesFor(userId),
-      keywords.catalogId(INDIVIDUAL_CATEGORY),
-      keywords.catalogId(SALARY_CATEGORY),
-    ]);
+    const [categories, rules, entries, individualId, salaryId] =
+      await Promise.all([
+        categoriesRepo.listAll(userId),
+        rulesRepo.listActive(userId),
+        keywords.entriesFor(userId),
+        keywords.catalogId(INDIVIDUAL_CATEGORY),
+        keywords.catalogId(SALARY_CATEGORY),
+      ]);
     const categoryById = new Map(categories.map((c) => [c.id, c]));
-    const individual = individualId ? categories.find((c) => c.default_category_id === individualId) : undefined;
-    const salary = salaryId ? categories.find((c) => c.default_category_id === salaryId) : undefined;
+    const individual = individualId
+      ? categories.find((c) => c.default_category_id === individualId)
+      : undefined;
+    const salary = salaryId
+      ? categories.find((c) => c.default_category_id === salaryId)
+      : undefined;
     const salaryFound: TransactionRow[] = [];
     const domainRules = rules.map(toRule);
 
     const patches = new Map<string, Patch>();
     const pendingLlm: TransactionRow[] = [];
     for (const t of rows) {
-      const rule = firstMatchingRule({ merchant: t.merchant_normalized ?? t.merchant_raw, vpa: t.counterparty_vpa, narration: t.narration, direction: t.direction }, domainRules);
+      const rule = firstMatchingRule(
+        {
+          merchant: t.merchant_normalized ?? t.merchant_raw,
+          vpa: t.counterparty_vpa,
+          narration: t.narration,
+          direction: t.direction,
+        },
+        domainRules,
+      );
       if (rule) {
         const categoryId = rule.categoryId ?? t.category_id;
-        patches.set(t.id, { category_id: categoryId, category_source: "rule", category_confidence: 1, transaction_kind: kindFor(t, categoryById.get(categoryId ?? ""), rule.transactionKind) });
+        patches.set(t.id, {
+          category_id: categoryId,
+          category_source: "rule",
+          category_confidence: 1,
+          transaction_kind: kindFor(
+            t,
+            categoryById.get(categoryId ?? ""),
+            rule.transactionKind,
+          ),
+        });
         continue;
       }
-      if (DETERMINISTIC_KINDS.has(t.transaction_kind) || t.status !== "success") continue;
+      if (DETERMINISTIC_KINDS.has(t.transaction_kind) || t.status !== "success")
+        continue;
 
       // Salary is recognised from the statement text before anything else (a payer is a business).
       if (salary && looksLikeSalary(t)) {
-        patches.set(t.id, { category_id: salary.id, category_source: "system", category_confidence: 1, transaction_kind: "income" });
+        patches.set(t.id, {
+          category_id: salary.id,
+          category_source: "system",
+          category_confidence: 1,
+          transaction_kind: "income",
+        });
         salaryFound.push(t);
         continue;
       }
 
       const mapped = matchCategory(matchTexts(t), entries);
-      const mappedCategory = mapped ? resolveCategory(mapped, categories) : null;
+      const mappedCategory = mapped
+        ? resolveCategory(mapped, categories)
+        : null;
       if (mapped && mappedCategory) {
         patches.set(t.id, {
           category_id: mappedCategory.id,
@@ -232,8 +430,20 @@ export function classificationService(db: Db, log: Logger) {
         });
         continue;
       }
-      if (individual && looksLikeIndividual({ merchant: t.merchant_normalized ?? t.merchant_raw, vpa: t.counterparty_vpa, narration: t.narration })) {
-        patches.set(t.id, { category_id: individual.id, category_source: "system", category_confidence: 1, transaction_kind: defaultKind(t) });
+      if (
+        individual &&
+        looksLikeIndividual({
+          merchant: t.merchant_normalized ?? t.merchant_raw,
+          vpa: t.counterparty_vpa,
+          narration: t.narration,
+        })
+      ) {
+        patches.set(t.id, {
+          category_id: individual.id,
+          category_source: "system",
+          category_confidence: 1,
+          transaction_kind: defaultKind(t),
+        });
         continue;
       }
       patches.set(t.id, { transaction_kind: defaultKind(t) });
@@ -245,12 +455,27 @@ export function classificationService(db: Db, log: Logger) {
     await savePatches(userId, patches);
     patches.clear();
     if (pendingLlm.length) {
-      await llmPass(userId, pendingLlm, categories, { individual, salary }, patches, reviewItems, salaryFound);
+      await llmPass(
+        userId,
+        pendingLlm,
+        categories,
+        { individual, salary },
+        patches,
+        reviewItems,
+        salaryFound,
+      );
       await savePatches(userId, patches);
       await reviews.openMany(userId, reviewItems);
     }
     await rememberSalarySources(userId, salaryFound, salary);
-    log.info({ classified: rows.length, llm: pendingLlm.length, review: reviewItems.length }, "classification step");
+    log.info(
+      {
+        classified: rows.length,
+        llm: pendingLlm.length,
+        review: reviewItems.length,
+      },
+      "classification step",
+    );
     return cursor;
   }
 
@@ -258,20 +483,29 @@ export function classificationService(db: Db, log: Logger) {
    * Keeps a reference to each employer found: an auto rule (money in from this payer → Salary,
    * income), so next month's salary is recognised without the LLM even if the text changes.
    */
-  async function rememberSalarySources(userId: string, found: TransactionRow[], salary: CategoryRow | undefined) {
+  async function rememberSalarySources(
+    userId: string,
+    found: TransactionRow[],
+    salary: CategoryRow | undefined,
+  ) {
     if (!salary) return;
     const seen = new Set<string>();
     for (const t of found) {
       const key = counterpartyKey(t);
       if (!key || seen.has(`${key.field}:${key.value}`)) continue;
       seen.add(`${key.field}:${key.value}`);
-      await rememberCounterparty(db, userId, t, { categoryId: salary.id, kind: "income" });
+      await rememberCounterparty(db, userId, t, {
+        categoryId: salary.id,
+        kind: "income",
+      });
     }
-    if (seen.size) log.info({ sources: seen.size }, "salary sources remembered");
+    if (seen.size)
+      log.info({ sources: seen.size }, "salary sources remembered");
   }
 
   async function savePatches(userId: string, patches: Map<string, Patch>) {
-    for (const [id, patch] of patches) await transactions.update(userId, id, patch);
+    for (const [id, patch] of patches)
+      await transactions.update(userId, id, patch);
   }
 
   return { classifyStep };

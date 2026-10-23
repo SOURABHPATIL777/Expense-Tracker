@@ -35,10 +35,17 @@ function sheetRows(sheet: XLSX.WorkSheet | undefined): string[][] {
 }
 
 /**
- * The sheet holding the transactions: the one with the most date + amount rows. Exports often
- * put a summary first (Paytm: "Summary", then "Passbook Payment History"). Falls back to the
- * first non-empty sheet.
+ * Every sheet that holds transactions, in workbook order, laid end to end (splitSections then
+ * separates their tables; a sheet continuing the previous one without a header joins it).
+ * Summary-only sheets are left out (Paytm puts "Summary" before "Passbook Payment History").
+ * Falls back to the first non-empty sheet so the caller can still report what's wrong.
  */
+export function workbookTable(workbook: XLSX.WorkBook): TableRead {
+  const sheets = workbook.SheetNames.map((name) => sheetRows(workbook.Sheets[name])).filter((rows) => rows.length > 0);
+  const withTransactions = sheets.filter((rows) => rows.some(looksLikeTransactionRow));
+  return { kind: "table", rows: withTransactions.length ? withTransactions.flat() : (sheets[0] ?? []) };
+}
+
 export function readXlsx(buffer: Buffer): TableRead {
   let workbook: XLSX.WorkBook;
   try {
@@ -50,12 +57,5 @@ export function readXlsx(buffer: Buffer): TableRead {
     }
     throw new AppError("IMPORT_UNREADABLE", { cause: err });
   }
-  const sheets = workbook.SheetNames.map((name) => sheetRows(workbook.Sheets[name])).filter((rows) => rows.length > 0);
-  let best = sheets[0] ?? [];
-  let bestScore = 0;
-  for (const rows of sheets) {
-    const score = rows.filter(looksLikeTransactionRow).length;
-    if (score > bestScore) [best, bestScore] = [rows, score];
-  }
-  return { kind: "table", rows: best };
+  return workbookTable(workbook);
 }

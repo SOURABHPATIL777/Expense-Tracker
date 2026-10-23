@@ -50,6 +50,8 @@ export type CategoryRow = Timestamps & {
 };
 
 
+export type ExtractedText = { lines: string[]; columns: string | null };
+
 export type ImportRow = Timestamps & {
   id: string;
   user_id: string;
@@ -63,7 +65,8 @@ export type ImportRow = Timestamps & {
   status: ImportStatus;
   preset_id: string | null;
   layout_id: string | null;
-  extracted_text: string[] | null;
+  /** Text held while the AI reads a file in chunks: lines plus the column header, if one was found. */
+  extracted_text: ExtractedText | string[] | null;
   detected_label: string | null;
   read_by_ai: boolean;
   error_code: string | null;

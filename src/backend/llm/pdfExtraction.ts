@@ -1,5 +1,6 @@
 import "server-only";
 import { z } from "zod";
+import { AppError } from "@/backend/errors/AppError";
 import { DIRECTIONS, SOURCE_APPS, SOURCE_KINDS, TRANSACTION_STATUSES } from "@/backend/constants/enums.constants";
 import { PDF_LLM } from "@/backend/constants/llm.constants";
 import { parseAmountToMinor } from "@/shared/utils/money";
@@ -24,11 +25,15 @@ const rowSchema = z.object({
 export type LlmPdfRow = z.infer<typeof rowSchema>;
 
 const chunkSchema = z.object({
+  /** Asked on the first part only: false when the file isn't a transaction statement at all. */
+  isStatement: z.boolean().default(true),
   source: z.object({ sourceKind: z.enum(SOURCE_KINDS), sourceApp: z.enum(SOURCE_APPS) }).nullish(),
   rows: z.array(rowSchema).max(300),
 });
 
-const INSTRUCTIONS = `You are given part of an Indian bank or UPI-app statement as plain text lines.
+const INSTRUCTIONS = `You are given part of a file a user uploaded as their Indian bank or UPI-app statement, as plain text lines
+(from a PDF, an HTML page or JSON records). If this is the first part, set isStatement: false when it is clearly not a
+transaction statement (an invoice, receipt, salary slip, resume, letter, price list…) and return no rows.
 List every transaction in this part. For each one, copy text EXACTLY as printed (do not reformat):
 - date (and time if printed), amount as printed (e.g. "1,250.00" or "₹350"), description line, counterparty if shown,
   status if shown (success/pending/failed);
@@ -95,14 +100,20 @@ export function verifyLlmRows(chunkText: string, rows: LlmPdfRow[]): { events: P
   return { events, dropped };
 }
 
-export async function readPdfChunkWithLlm(userId: string, lines: string[], first: boolean) {
+/**
+ * Reads one chunk. `columnsReference` is the statement's column header (found on page 1 or
+ * wherever the table starts) so parts without a header of their own are read the same way.
+ */
+export async function readPdfChunkWithLlm(userId: string, lines: string[], first: boolean, columnsReference?: string | null) {
   const text = redactForExtraction(lines.join("\n"));
+  const reference = columnsReference ? `\nThe statement's columns, from its header: ${columnsReference}` : "";
   const out = await runLlmTask({
     userId,
     task: "pdf_extraction",
     schema: chunkSchema,
-    instructions: first ? INSTRUCTIONS : `${INSTRUCTIONS}\nThis is not the first part; leave source empty.`,
+    instructions: `${INSTRUCTIONS}${reference}${first ? "" : "\nThis is not the first part; leave source empty and isStatement true."}`,
     data: text,
   });
+  if (first && out.isStatement === false) throw new AppError("NOT_A_STATEMENT");
   return { source: out.source ?? null, ...verifyLlmRows(text, out.rows) };
 }

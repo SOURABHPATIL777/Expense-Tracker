@@ -13,15 +13,42 @@ export function llmAvailable(): boolean {
 }
 
 /**
- * The single model client (Ollama via the AI SDK), built from env + constants. Some models
- * (e.g. glm on Ollama Cloud) wrap JSON in markdown fences; the middleware strips them so
- * structured output still validates.
+ * Turns a model's reply into bare JSON text: drops reasoning a "thinking" model leaked into its
+ * answer (glm-5.3-flash with thinking off still emits "…</think>{…}") and markdown fences
+ * (glm wraps JSON in ```json … ```).
  */
+export function cleanModelJson(text: string): string {
+  const afterThinking = text.includes("</think>") ? text.slice(text.lastIndexOf("</think>") + "</think>".length) : text;
+  const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(afterThinking);
+  const candidate = (fenced ? fenced[1] : afterThinking).trim();
+  return isJson(candidate) ? candidate : (trailingJson(candidate) ?? candidate);
+}
+
+const isJson = (text: string) => {
+  try {
+    JSON.parse(text);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/** The JSON value a reply ends with, when prose (untagged reasoning) comes before it. */
+function trailingJson(text: string): string | null {
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] !== "{" && text[i] !== "[") continue;
+    const rest = text.slice(i).trim();
+    if (isJson(rest)) return rest;
+  }
+  return null;
+}
+
+/** The single model client (Ollama via the AI SDK), built from env + constants. */
 export function getModel(model: string = LLM.MODEL): LanguageModel {
   const env = getEnv();
   const ollama = createOllama({
     baseURL: env.OLLAMA_BASE_URL,
     headers: env.OLLAMA_API_KEY ? { Authorization: `Bearer ${env.OLLAMA_API_KEY}` } : undefined,
   });
-  return wrapLanguageModel({ model: ollama(model), middleware: extractJsonMiddleware() });
+  return wrapLanguageModel({ model: ollama(model), middleware: extractJsonMiddleware({ transform: cleanModelJson }) });
 }

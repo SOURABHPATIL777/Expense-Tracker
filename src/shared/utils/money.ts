@@ -27,7 +27,9 @@ export function parseAmountToMinor(raw: string | number | null | undefined): num
     .replace(/₹|rs\.?|inr/gi, "")
     .replace(/\(?(?<![a-z])(dr|cr)\b\.?\)?/gi, "")
     .replace(/[,\s]/g, "")
-    .replace(/^\((.*)\)$/, "-$1");
+    .replace(/^\((.*)\)$/, "-$1")
+    // Some statements print amounts under ₹1 without the leading zero (".99").
+    .replace(/^([-+]?)\./, (_, sign: string) => `${sign}0.`);
   if (!/^[-+]?\d+(\.\d{1,2})?$/.test(cleaned)) return null;
   const negative = cleaned.startsWith("-");
   const [whole, fraction = ""] = cleaned.replace(/^[-+]/, "").split(".");
