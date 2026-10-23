@@ -127,6 +127,9 @@ function guessTimeFormat(time: string): string {
   return hasAmPm ? `${base}${/\s[ap]m$/i.test(t) ? " " : ""}a` : base;
 }
 
+/** True when `value` is exactly in `format` (no fallbacks), for working out a column's format. */
+export const matchesDateFormat = (value: string, format: string): boolean => matchFormat(value.replace(/\s+/g, " ").trim(), format) !== null;
+
 /** `yyyy-MM-dd` (IST calendar date) for an ISO timestamp. */
 export function istDate(iso: string): string {
   return new Date(Date.parse(iso) + IST_OFFSET_MINUTES * 60_000).toISOString().slice(0, 10);

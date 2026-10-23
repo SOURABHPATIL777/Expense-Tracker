@@ -44,6 +44,7 @@ export const mappingSchema = z.object({
   amount: z.discriminatedUnion("mode", [
     z.object({ mode: z.literal("split"), debit: columnIndex, credit: columnIndex }),
     z.object({ mode: z.literal("signed"), amount: columnIndex }),
+    z.object({ mode: z.literal("balance"), amount: columnIndex }),
     z.object({
       mode: z.literal("typed"),
       amount: columnIndex,
@@ -84,7 +85,9 @@ export function configFromMapping(input: MappingInput, header: string[], source:
       ? { mode: "split", debit: col(a.debit)!, credit: col(a.credit)! }
       : a.mode === "signed"
         ? { mode: "signed", amount: col(a.amount)! }
-        : { mode: "typed", amount: col(a.amount)!, type: col(a.type)!, debitValues: a.debitValues, creditValues: a.creditValues };
+        : a.mode === "balance"
+          ? { mode: "balance", amount: col(a.amount)! }
+          : { mode: "typed", amount: col(a.amount)!, type: col(a.type)!, debitValues: a.debitValues, creditValues: a.creditValues };
 
   return {
     id: `llm:${headerSignature(header).slice(0, 80)}`,
@@ -114,7 +117,7 @@ const AMOUNT_LIKE = /^[+-]?\s*(₹|rs\.?|inr)?\s*[\d,]+\.\d{1,2}(\s*(dr|cr))?$/i
 export function mappingProblems(input: MappingInput, read: TableRead): string[] {
   const problems: string[] = [];
   const a = input.amount;
-  const amountColumns: Record<string, number> = a.mode === "split" ? { debit: a.debit, credit: a.credit } : a.mode === "signed" ? { amount: a.amount } : { amount: a.amount, type: a.type };
+  const amountColumns: Record<string, number> = a.mode === "split" ? { debit: a.debit, credit: a.credit } : a.mode === "typed" ? { amount: a.amount, type: a.type } : { amount: a.amount };
   const used = Object.entries({ ...input.columns, ...amountColumns });
   const byIndex = new Map<number, string[]>();
   for (const [field, index] of used) if (index !== undefined) byIndex.set(index, [...(byIndex.get(index) ?? []), field]);

@@ -109,7 +109,7 @@ export const REFUND_STATUSES = ["open", "suggested", "matched", "closed"] as con
 export type RefundStatus = (typeof REFUND_STATUSES)[number];
 
 /** Every kind of model call; mirrored by the llm_task SQL enum (used for usage logging). */
-export const LLM_TASKS = ["categorize", "column_mapping", "pdf_extraction", "monthly_summary", "refund_message"] as const;
+export const LLM_TASKS = ["categorize", "column_mapping", "monthly_summary", "refund_message"] as const;
 export type LlmTask = (typeof LLM_TASKS)[number];
 
 export const JOB_TYPES = ["parse_import", "classify_transactions", "match_refunds"] as const;

@@ -135,7 +135,7 @@ export function importsService(db: Db, log: Logger) {
       const row = await imports.findById(userId, id);
       if (row.status !== "needs_password") throw invalidState();
       // Unknown PDFs are only unlocked here (text saved); the AI reads them in background steps.
-      const status = await importPipeline(db, log).extractStage(userId, id, { password, maxPdfChunks: 0 });
+      const status = await importPipeline(db, log).extractStage(userId, id, { password });
       const next = NEXT_STAGE[status];
       if (next) await queueExtract(userId, id, next);
       return toImportDto(await imports.findById(userId, id));

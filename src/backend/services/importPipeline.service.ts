@@ -3,49 +3,57 @@ import { randomUUID } from "node:crypto";
 import type { Db } from "@/backend/supabase/clients";
 import type { Logger } from "@/backend/logger/logger";
 import { AppError } from "@/backend/errors/AppError";
-import { JOBS, MATCHING } from "@/backend/constants/app.constants";
-import { LLM, PDF_LLM } from "@/backend/constants/llm.constants";
-import { timeLeftMs } from "@/backend/jobs/deadline";
+import { JOBS, MATCHING, STATEMENT_TABLE } from "@/backend/constants/app.constants";
 import type { ImportStatus, SourceApp, SourceKind } from "@/backend/constants/enums.constants";
 import { SOURCE_APP_LABELS } from "@/shared/constants/labels";
 import { ImportsRepository } from "@/backend/repositories/imports.repository";
 import { ImportLayoutsRepository } from "@/backend/repositories/importLayouts.repository";
 import { RawEventsRepository } from "@/backend/repositories/rawEvents.repository";
-import { TransactionsRepository, TransactionSourcesRepository } from "@/backend/repositories/transactions.repository";
+import { TransactionsRepository, TransactionSourcesRepository, type CandidateRow } from "@/backend/repositories/transactions.repository";
 import { ReviewItemsRepository, type NewReviewItem } from "@/backend/repositories/reviewItems.repository";
 import { AccountsRepository } from "@/backend/repositories/accounts.repository";
 import { UploadedFilesRepository } from "@/backend/repositories/uploadedFiles.repository";
-import type { ExtractedText, ImportLayoutRow, ImportRow, RawEventRow, TransactionRow, TransactionSourceRow } from "@/backend/repositories/types";
+import type { ImportLayoutRow, ImportRow, RawEventRow, TransactionRow, TransactionSourceRow } from "@/backend/repositories/types";
 import { detectFormat, READER_LABELS, readerFor, readFile } from "@/backend/import/readers";
 import { splitSections } from "@/backend/import/sections";
 import { assertLooksLikeStatement } from "@/backend/import/statementCheck";
-import { looksLikeHeaderRow } from "@/backend/import/text";
+import { detectSource, type Source } from "@/backend/import/detectSource";
+import { mapColumnsLocally } from "@/backend/import/headerMapping";
+import { configFromMapping } from "@/backend/import/mapping";
+import { proveMapping } from "@/backend/import/proveMapping";
+import { parseTextRecords } from "@/backend/import/textRecords";
 import { detectConfig, extract, findHeaderRow } from "@/backend/import/engine";
 import { istDate } from "@/backend/import/dates";
-import { headerSignature, textLayoutFingerprint } from "@/backend/import/text";
+import { headerSignature } from "@/backend/import/text";
 import type { ExtractedRow, ExtractResult, ImportConfig, ParsedEvent, ReaderId, TableRead } from "@/backend/import/types";
 import { fingerprintAll, sha256Hex } from "@/backend/domain/fingerprint";
-import { matchIncoming, type MatchCandidate } from "@/backend/domain/matcher";
+import { matchIncoming, type ExistingTransaction } from "@/backend/domain/matcher";
 import { inferKind, paymentRail } from "@/backend/domain/inferKind";
 import { displayMerchant } from "@/backend/domain/merchant";
 import { mapColumnsWithLlm } from "@/backend/llm/columnMapping";
-import { chunkLines, readPdfChunkWithLlm } from "@/backend/llm/pdfExtraction";
 import { statementStorage } from "./storage";
 
-/** Statuses from which the extract stage may (re)run; `parsing` also resumes an AI read of a PDF. */
+/** Statuses from which the extract stage may (re)run (`parsing`: interrupted, or left by the retired AI reader). */
 const EXTRACTABLE = new Set<ImportStatus>(["queued", "parsing", "needs_password"]);
 const HOUR_MS = 3_600_000;
 const TEXT_LIMIT = 500;
 
-type Source = { sourceKind: SourceKind; sourceApp: SourceApp };
 type Detected = Source & { layoutId: string | null; label: string; readByAi: boolean; configId: string };
 
-/** Older imports stored the AI-read text as a plain array of lines. */
-const textOf = (row: ImportRow): ExtractedText | null =>
-  !row.extracted_text ? null : Array.isArray(row.extracted_text) ? { lines: row.extracted_text, columns: null } : row.extracted_text;
+/** Share of dated records a text statement must read cleanly before its rows are trusted. */
+const TEXT_RECORDS_MIN_SHARE = 0.8;
 
-/** The statement's column header among text lines (e.g. "Date Transaction Details Type Amount"). */
-const headerLine = (lines: readonly string[]) => lines.slice(0, 60).find((l) => looksLikeHeaderRow(l.split(/\s{2,}|\s(?=[A-Z])/))) ?? null;
+/** Rows plus the statement period they cover. */
+const withPeriod = (rows: ExtractedRow[]): ExtractResult => {
+  const days = rows.flatMap((r) => (r.parsed ? [istDate(r.parsed.occurredAt)] : [])).sort();
+  return { rows, periodStart: days[0] ?? null, periodEnd: days.at(-1) ?? null };
+};
+
+/** The source read from the file itself wins over a stored layout's or the AI's guess. */
+const withSource = (d: Detected, source: Source | null, formatLabel: string): Detected =>
+  source && (source.sourceApp !== d.sourceApp || source.sourceKind !== d.sourceKind)
+    ? { ...d, ...source, label: `${SOURCE_APP_LABELS[source.sourceApp]} statement (${formatLabel})` }
+    : d;
 
 const fallbackSource = (kind: SourceKind | null): Source =>
   kind === "upi_app" ? { sourceKind: "upi_app", sourceApp: "other_upi" } : { sourceKind: "bank", sourceApp: "other_bank" };
@@ -140,15 +148,14 @@ export function importPipeline(db: Db, log: Logger) {
 
   /**
    * Each table in the file (every sheet and section; PDF pages rebuilt as a table) is read with its
-   * own stored or AI-learned column mapping, one mapping per distinct header. Returns null when no
-   * section could be mapped (the caller falls back to the AI line reader, or fails).
+   * own column mapping, one per distinct header. Returns null when no section could be mapped.
    */
   async function readTableSections(
     userId: string,
     row: ImportRow,
     table: TableRead,
     formatLabel: string,
-    documentStart: readonly string[],
+    source: Source | null,
   ): Promise<{ result: ExtractResult; detected: Detected } | null> {
     type Mapping = { config: ImportConfig; detected: Detected };
     const mappings = new Map<string, Mapping | null>();
@@ -158,7 +165,7 @@ export function importPipeline(db: Db, log: Logger) {
 
     for (const section of splitSections(table)) {
       const key = section.signature || "__whole__";
-      if (!mappings.has(key)) mappings.set(key, await mapSection(userId, row, section.read, formatLabel, documentStart));
+      if (!mappings.has(key)) mappings.set(key, await mapSection(userId, row, section.read, formatLabel, source));
       const mapping = mappings.get(key);
       if (!mapping) continue;
       first ??= mapping.detected;
@@ -167,36 +174,48 @@ export function importPipeline(db: Db, log: Logger) {
       for (const r of extract(section.read, mapping.config).rows) rows.push({ ...r, rowIndex: section.rowIndexes[r.rowIndex] ?? r.rowIndex });
     }
     if (!first) return null;
-    const days = rows.flatMap((r) => (r.parsed ? [istDate(r.parsed.occurredAt)] : [])).sort();
-    log.info({ importId: row.id, sections: mappings.size, rows: rows.length }, "table sections read");
-    return { result: { rows, periodStart: days[0] ?? null, periodEnd: days.at(-1) ?? null }, detected: { ...first, readByAi: usedAi } };
+    log.info({ importId: row.id, sections: mappings.size, rows: rows.length, ai: usedAi }, "table sections read");
+    return { result: withPeriod(rows), detected: { ...first, readByAi: usedAi } };
   }
 
-  /** A stored layout for this table's header, else an AI-proposed mapping (proved, then stored). */
+  /**
+   * How to read one table, each answer proved on the file (rows parse, balances reconcile):
+   * a stored layout for this header; else a mapping worked out locally from the header names;
+   * else, only as a last resort, the LLM given the header and at most 5 redacted rows.
+   */
   async function mapSection(
     userId: string,
     row: ImportRow,
     read: TableRead,
     formatLabel: string,
-    documentStart: readonly string[],
+    source: Source | null,
   ): Promise<{ config: ImportConfig; detected: Detected } | null> {
     const match = await matchLayout(read);
-    if (match && extract(read, match.config).rows.some((r) => r.parsed)) {
+    const stored = match ? proveMapping(read, match.config) : null;
+    if (match && stored?.ok) {
       await layouts.touch(match.layout);
-      return {
-        config: match.config,
-        detected: {
-          sourceKind: match.layout.source_kind,
-          sourceApp: match.layout.source_app as SourceApp,
-          layoutId: match.layout.id,
-          label: match.layout.label,
-          readByAi: false,
-          configId: match.config.id,
-        },
-      };
+      const layoutSource = { sourceKind: match.layout.source_kind, sourceApp: match.layout.source_app as SourceApp };
+      return { config: stored.config, detected: { ...layoutSource, layoutId: match.layout.id, label: match.layout.label, readByAi: false, configId: match.config.id } };
     }
+
+    const local = mapColumnsLocally(read);
+    if (local) {
+      const header = read.rows[local.headerRowIndex];
+      const known = source ?? fallbackSource(null);
+      const config = configFromMapping(local, header, { ...known, label: `${SOURCE_APP_LABELS[known.sourceApp]} statement (${formatLabel})` });
+      const proof = proveMapping(read, config);
+      if (proof.ok) {
+        const saved = await layouts.save(
+          { kind: "table", signature: headerSignature(header), label: config.label, source_kind: known.sourceKind, source_app: known.sourceApp, config: proof.config },
+          "manual",
+        );
+        return { config: proof.config, detected: { ...known, layoutId: saved.id, label: config.label, readByAi: false, configId: config.id } };
+      }
+      log.info({ importId: row.id, reason: proof.problems }, "local mapping not proved; asking the AI");
+    }
+
     try {
-      const mapped = await mapColumnsWithLlm(userId, row.file_name, read, formatLabel, documentStart);
+      const mapped = await mapColumnsWithLlm(userId, row.file_name, read, formatLabel);
       const headerIdx = findHeaderRow(read.rows, mapped.config.table);
       const learned = await layouts.save({
         kind: "table",
@@ -211,163 +230,63 @@ export function importPipeline(db: Db, log: Logger) {
         detected: { sourceKind: mapped.sourceKind, sourceApp: mapped.sourceApp, layoutId: learned.id, label: mapped.config.label, readByAi: true, configId: mapped.config.id },
       };
     } catch (err) {
-      // This table's columns couldn't be proved; other sections (or the AI line reader) may still work.
+      // This table's columns couldn't be proved; other sections may still work.
       if (err instanceof AppError && err.code === "IMPORT_UNREADABLE") return null;
       throw err;
     }
   }
 
-  /**
-   * Reads the next chunks of a file's text with the LLM (one job step): the first chunk alone
-   * (it also identifies the source and confirms it's a statement), then up to `maxChunks` at once
-   * in parallel. Verified rows are appended in chunk order. Returns `parsing` while chunks remain,
-   * `processing` once the whole file is read.
-   */
-  async function continuePdfRead(row: ImportRow, maxChunks: number): Promise<ImportStatus> {
-    const text = textOf(row) ?? { lines: [], columns: null };
-    const chunks = chunkLines(text.lines);
-    let { cursor, row_count: total, skipped_count: skipped, period_start: periodStart, period_end: periodEnd } = row;
-    let source: Source | null = row.source_app ? { sourceKind: row.source_kind!, sourceApp: row.source_app as SourceApp } : null;
-
-    while (cursor < chunks.length && maxChunks > 0) {
-      // Not enough time left in this step for a call: continue in the next step.
-      if (timeLeftMs() < LLM.MIN_CALL_MS + LLM.DEADLINE_MARGIN_MS) break;
-      const batch = cursor === 0 ? [0] : Array.from({ length: Math.min(maxChunks, chunks.length - cursor) }, (_, i) => cursor + i);
-      const settled = await Promise.allSettled(batch.map((i) => readPdfChunkWithLlm(row.user_id, chunks[i], i === 0, text.columns)));
-
-      // Keep every chunk up to the first failure, in order; the failed one is retried next time.
-      let failure: unknown = null;
-      for (const [n, outcome] of settled.entries()) {
-        if (outcome.status === "rejected") {
-          failure = outcome.reason;
-          break;
-        }
-        const chunk = outcome.value;
-        if (!source && chunk.source) source = chunk.source;
-        const fps = fingerprintAll(source?.sourceApp ?? "other_bank", chunk.events);
-        const parsedSoFar = total - skipped;
-        await rawEvents.appendForImport(
-          row.user_id,
-          chunk.events.map((e, i) => ({
-            import_id: row.id,
-            row_index: parsedSoFar + i,
-            raw: { chunk: batch[n] },
-            parsed: e,
-            fingerprint: fps[i],
-            status: "pending" as const,
-            error: null,
-            transaction_id: null,
-          })),
-        );
-        for (const e of chunk.events) {
-          const day = istDate(e.occurredAt);
-          if (!periodStart || day < periodStart) periodStart = day;
-          if (!periodEnd || day > periodEnd) periodEnd = day;
-        }
-        total += chunk.events.length + chunk.dropped;
-        skipped += chunk.dropped;
-        cursor = batch[n] + 1;
-      }
-      row = await imports.update(row.user_id, row.id, {
-        cursor,
-        row_count: total,
-        skipped_count: skipped,
-        period_start: periodStart,
-        period_end: periodEnd,
-        ...(source && { source_kind: source.sourceKind, source_app: source.sourceApp }),
-      });
-      if (failure) throw failure;
-      if (batch.length > 1 || cursor > 1) break; // one parallel batch per step
-    }
-    if (cursor < chunks.length) return "parsing";
-
-    if (total - skipped === 0) {
-      await imports.update(row.user_id, row.id, { extracted_text: null });
-      throw new AppError("NOT_A_STATEMENT");
-    }
-    const final = source ?? fallbackSource(row.source_kind);
-    const label = `${SOURCE_APP_LABELS[final.sourceApp]} statement (read by AI)`;
-    // Remember this statement layout's source (hash of its header lines only, never the text).
-    const layout = await layouts.save({
-      kind: "llm_extract",
-      signature: textLayoutFingerprint(text.lines),
-      label,
-      source_kind: final.sourceKind,
-      source_app: final.sourceApp,
-      config: {},
-    });
-    await imports.update(row.user_id, row.id, {
-      status: "processing",
-      extracted_text: null,
-      cursor: 0,
-      source_kind: final.sourceKind,
-      source_app: final.sourceApp,
-      layout_id: layout.id,
-      detected_label: label,
-      account_id: await autoAccount(row, final.sourceApp),
-    });
-    log.info({ importId: row.id, rows: total - skipped, dropped: skipped }, "read by AI");
-    return "processing";
-  }
-
-  async function extractStage(userId: string, importId: string, opts: { password?: string; maxPdfChunks?: number } = {}): Promise<ImportStatus> {
-    const maxChunks = opts.maxPdfChunks ?? PDF_LLM.CHUNKS_PER_STEP;
+  async function extractStage(userId: string, importId: string, opts: { password?: string } = {}): Promise<ImportStatus> {
     let row = await imports.findById(userId, importId);
     if (!EXTRACTABLE.has(row.status)) return row.status;
-    row = await imports.update(userId, importId, { status: "parsing", error_code: null, error_message: null });
+    // `extracted_text` belonged to the retired AI reader; such imports are simply read again locally.
+    row = await imports.update(userId, importId, { status: "parsing", error_code: null, error_message: null, extracted_text: null });
     await files.setStatus(userId, row.file_path, "processing");
 
     try {
-      // An AI read already in progress: carry on from the saved text.
-      if (row.extracted_text) return await continuePdfRead(row, maxChunks);
-
       const { buffer, reader } = await loadFile(row);
       const read = await readFile(reader, buffer, opts.password);
-      // Cheap gate before any AI call: a statement has rows with dates and amounts.
+      // Cheap gate: a statement has rows with dates and amounts.
       assertLooksLikeStatement(read);
-
-      // Tables first (CSV/Excel, HTML tables, JSON records, PDFs laid out as tables): every sheet
-      // and section, each with a stored or AI-learned column mapping.
+      const formatLabel = READER_LABELS[reader];
       const table = read.kind === "table" ? read : read.table;
+      // Whose statement it is, from its own header (IFSC, bank/app name) or the file name.
+      const firstLines = read.kind === "text" ? read.lines : (table?.rows ?? []).map((r) => r.filter(Boolean).join(" "));
+      const source = detectSource(row.file_name, firstLines);
+
+      // Tables (CSV/Excel, HTML tables, JSON records, PDFs laid out as tables): every section.
       if (table) {
-        // The top of the document (bank name, account header) identifies the bank or app.
-        const documentStart = read.kind === "text" ? read.lines : table.rows.map((r) => r.filter(Boolean).join(" "));
-        const sections = await readTableSections(userId, row, table, READER_LABELS[reader], documentStart);
-        if (sections) return await saveExtracted(row, sections.result, sections.detected);
+        const sections = await readTableSections(userId, row, table, formatLabel, source);
+        if (sections) return await saveExtracted(row, sections.result, withSource(sections.detected, source, formatLabel));
       }
       if (read.kind === "table") {
         throw new AppError("IMPORT_UNREADABLE", { message: "We couldn't work out this file's columns. Try exporting it again, or as a different format." });
       }
 
-      // Not a table (or its columns couldn't be proved): the AI reads the text in chunks. A
-      // layout seen before tells us the source up front; the header line guides every chunk.
-      const known = await layouts.find("llm_extract", textLayoutFingerprint(read.lines));
-      const columns = table ? table.rows.find((r) => looksLikeHeaderRow(r))?.join(" | ") ?? headerLine(read.lines) : headerLine(read.lines);
-      await rawEvents.replaceForImport(userId, importId, []);
-      row = await imports.update(userId, importId, {
-        extracted_text: { lines: read.lines, columns },
-        cursor: 0,
-        row_count: 0,
-        skipped_count: 0,
-        period_start: null,
-        period_end: null,
-        read_by_ai: true,
-        detected_label: known?.label ?? "Reading with AI",
-        source_kind: known?.source_kind ?? null,
-        source_app: known?.source_app ?? null,
-        preset_id: "llm_extract",
+      // Statements that aren't tables (UPI-app PDFs, activity pages, JSON lines): read locally.
+      const records = parseTextRecords(read.lines);
+      const parsed = records.filter((r) => r.parsed).length;
+      if (parsed < STATEMENT_TABLE.MIN_TRANSACTION_ROWS || parsed / records.length < TEXT_RECORDS_MIN_SHARE) {
+        throw new AppError("IMPORT_UNREADABLE", {
+          message: "We couldn't read the transactions in this file. Download the statement as Excel or CSV if your app offers it.",
+        });
+      }
+      // UPI-app statements often name the app only in their footer.
+      const known = source ?? detectSource(row.file_name, read.lines, "document") ?? fallbackSource("upi_app");
+      return await saveExtracted(row, withPeriod(records), {
+        ...known,
+        layoutId: null,
+        label: `${SOURCE_APP_LABELS[known.sourceApp]} statement (${formatLabel})`,
+        readByAi: false,
+        configId: "text_records",
       });
-      return await continuePdfRead(row, maxChunks);
     } catch (err) {
       if (err instanceof AppError && err.code === "PASSWORD_REQUIRED") {
         return setStatus(row, "needs_password", opts.password ? err.message : null, err.code);
       }
-      if (err instanceof AppError && err.status < 500) {
-        await imports.update(userId, importId, { extracted_text: null });
-        return setStatus(row, "failed", err.message, err.code);
-      }
-      // Transient failure (e.g. the LLM timed out): stay resumable for the job retry.
-      await setStatus(row, row.extracted_text ? "parsing" : "queued");
+      if (err instanceof AppError && err.status < 500) return setStatus(row, "failed", err.message, err.code);
+      // Transient failure (e.g. the AI fallback timed out): stay resumable for the job retry.
+      await setStatus(row, "queued");
       throw err;
     }
   }
@@ -394,18 +313,37 @@ export function importPipeline(db: Db, log: Logger) {
     };
   }
 
-  const toCandidate = (t: TransactionRow): MatchCandidate => ({
+  const toCandidate = (t: CandidateRow): ExistingTransaction => ({
     id: t.id,
     amountMinor: t.amount_minor,
     direction: t.direction,
     occurredAt: t.occurred_at,
     referenceId: t.reference_id,
+    counterpartyVpa: t.counterparty_vpa,
+    counterpartyName: t.merchant_normalized ?? t.merchant_raw,
+    narration: t.narration,
+    sourceKinds: t.transaction_sources.map((s) => s.source_kind),
+    sourceApps: t.transaction_sources.map((s) => s.source_app),
+    importIds: t.transaction_sources.map((s) => s.import_id),
+    balances: t.transaction_sources.flatMap((s) => (typeof s.raw_events?.parsed?.balanceMinor === "number" ? [s.raw_events.parsed.balanceMinor] : [])),
   });
+
+  /** Details the other statement adds to a linked transaction, filling only what's missing. */
+  function enrichment(existing: ExistingTransaction, e: ParsedEvent, sourceKind: string): Partial<TransactionRow> {
+    const appName = sourceKind === "upi_app" ? displayMerchant(e.counterpartyName, e.counterpartyVpa) : null;
+    return {
+      ...(!existing.referenceId && e.referenceId && { reference_id: e.referenceId }),
+      ...(!existing.counterpartyVpa && e.counterpartyVpa && { counterparty_vpa: e.counterpartyVpa.toLowerCase() }),
+      ...(e.appTransactionId && { app_transaction_id: e.appTransactionId }),
+      // The app's clean payee name reads better than a bank narration ("UPI-SWIGGY-…").
+      ...(appName && { merchant_normalized: appName }),
+    };
+  }
 
   async function processBatch(row: ImportRow, pending: RawEventRow[]): Promise<void> {
     const userId = row.user_id;
     const events = pending.map((raw) => ({ raw, e: raw.parsed as ParsedEvent }));
-    const windowMs = MATCHING.DUPLICATE_WINDOW_HOURS * HOUR_MS;
+    const windowMs = Math.max(MATCHING.DUPLICATE_WINDOW_HOURS * HOUR_MS, (MATCHING.CROSS_SOURCE_DAYS_AFTER + 1) * 24 * HOUR_MS);
     const times = events.map((x) => Date.parse(x.e.occurredAt));
 
     const [known, ownVpas, existing] = await Promise.all([
@@ -435,6 +373,11 @@ export function importPipeline(db: Db, log: Logger) {
       source_app: row.source_app ?? "other_bank",
     });
 
+    const sourceKind = row.source_kind ?? "bank";
+    const sourceApp = row.source_app ?? "other_bank";
+    const enrichments = new Map<string, Partial<TransactionRow>>();
+    const window = { daysBefore: MATCHING.CROSS_SOURCE_DAYS_BEFORE, daysAfter: MATCHING.CROSS_SOURCE_DAYS_AFTER, minutes: MATCHING.SAME_TIME_MINUTES };
+
     for (const { raw, e } of events) {
       if (known.has(raw.fingerprint)) {
         outcomes.push({ ...raw, status: "duplicate" });
@@ -442,15 +385,39 @@ export function importPipeline(db: Db, log: Logger) {
         continue;
       }
       const decision = matchIncoming(
-        { amountMinor: e.amountMinor, direction: e.direction, occurredAt: e.occurredAt, referenceId: e.referenceId },
+        {
+          amountMinor: e.amountMinor,
+          direction: e.direction,
+          occurredAt: e.occurredAt,
+          referenceId: e.referenceId,
+          sourceKind,
+          sourceApp,
+          importId: row.id,
+          counterpartyVpa: e.counterpartyVpa,
+          counterpartyName: e.counterpartyName,
+          narration: e.narration,
+          balanceMinor: e.balanceMinor,
+        },
         candidates,
-        MATCHING.DUPLICATE_WINDOW_HOURS,
+        window,
       );
-      if (decision.kind === "same_reference") {
+      if (decision.kind === "same_row") {
+        // Already imported from another copy of this statement.
+        outcomes.push({ ...raw, status: "duplicate", transaction_id: decision.transactionId });
+        counts.duplicate_count += 1;
+        continue;
+      }
+      if (decision.kind === "same_reference" || decision.kind === "cross_source") {
         newSources.push(source(decision.transactionId, raw));
         outcomes.push({ ...raw, status: "linked", transaction_id: decision.transactionId });
         linkedIds.add(decision.transactionId);
         counts.linked_count += 1;
+        const existing = candidates.find((c) => c.id === decision.transactionId)!;
+        enrichments.set(existing.id, { ...enrichments.get(existing.id), ...enrichment(existing, e, sourceKind) });
+        // It now has a row from this side too, so it can't be paired again.
+        existing.sourceKinds.push(sourceKind);
+        existing.sourceApps.push(sourceApp);
+        if (!existing.referenceId && e.referenceId) existing.referenceId = e.referenceId;
         continue;
       }
       const id = randomUUID();
@@ -468,7 +435,21 @@ export function importPipeline(db: Db, log: Logger) {
           payload: { candidates: decision.transactionIds },
         });
       }
-      candidates.push({ id, amountMinor: e.amountMinor, direction: e.direction, occurredAt: e.occurredAt, referenceId: e.referenceId });
+      // Part of this import: later imports can match it, rows of this file never do.
+      candidates.push({
+        id,
+        amountMinor: e.amountMinor,
+        direction: e.direction,
+        occurredAt: e.occurredAt,
+        referenceId: e.referenceId,
+        counterpartyVpa: e.counterpartyVpa,
+        counterpartyName: e.counterpartyName,
+        narration: e.narration,
+        sourceKinds: [sourceKind],
+        sourceApps: [sourceApp],
+        importIds: [row.id],
+        balances: e.balanceMinor === null ? [] : [e.balanceMinor],
+      });
     }
 
     if (!(await transactions.tryInsertMany(userId, newTx))) {
@@ -487,6 +468,7 @@ export function importPipeline(db: Db, log: Logger) {
     }
 
     await sources.insertManyRows(userId, newSources);
+    for (const [id, patch] of enrichments) await transactions.enrich(userId, id, patch);
     await rawEvents.saveOutcomes(userId, outcomes);
 
     const kinds = await sources.sourceKindsFor(userId, [...linkedIds]);

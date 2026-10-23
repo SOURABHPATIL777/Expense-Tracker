@@ -33,7 +33,9 @@ export type AmountSpec =
   /** One column, sign or Dr/Cr suffix decides direction ("-350", "+500", "450.00 Dr"). */
   | { mode: "signed"; amount: string[] }
   /** One amount column plus a type column ("DEBIT"/"CREDIT", "Paid"/"Received"). */
-  | { mode: "typed"; amount: string[]; type: string[]; debitValues: string[]; creditValues: string[] };
+  | { mode: "typed"; amount: string[]; type: string[]; debitValues: string[]; creditValues: string[] }
+  /** Unsigned amounts: direction from the running balance's change (needs a balance column). */
+  | { mode: "balance"; amount: string[] };
 
 export type StatusSpec = { column: string[]; map: Record<string, TransactionStatus> };
 

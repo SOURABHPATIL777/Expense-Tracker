@@ -8,22 +8,34 @@ import { inBatches } from "./inBatches";
 
 export type CandidateQuery = { references: string[]; amounts: number[]; from: string; to: string; direction?: Direction };
 
+/** A transaction with the statements it was seen in (kind, app, import and the row's parsed data). */
+export type CandidateRow = TransactionRow & {
+  transaction_sources: Array<{ source_kind: string; source_app: string; import_id: string; raw_events: { parsed: { balanceMinor?: number | null } | null } | null }>;
+};
+
+const CANDIDATE_COLUMNS = "*, transaction_sources(source_kind, source_app, import_id, raw_events(parsed))";
+
 export class TransactionsRepository extends BaseRepository<TransactionRow> {
   protected readonly table = TABLES.TRANSACTIONS;
   protected readonly defaultOrder: OrderBy = { column: "occurred_at", ascending: false };
 
-  /** Existing transactions that could be the same money movement as a batch of incoming events. */
-  async findCandidates(userId: string, q: CandidateQuery): Promise<TransactionRow[]> {
+  /**
+   * Existing transactions that could be the same money movement as a batch of incoming events,
+   * with the statements each was seen in (for telling app ↔ bank pairs from re-imports).
+   */
+  async findCandidates(userId: string, q: CandidateQuery): Promise<CandidateRow[]> {
+    const run = async (refine: (b: ReturnType<typeof this.withSources>) => ReturnType<typeof this.withSources>) =>
+      unwrap(await refine(this.withSources(userId)), "transactions.findCandidates") as CandidateRow[];
     // One query per URL-safe chunk: a 500-row import step would otherwise exceed the URL limit.
-    const byRef = await inBatches(q.references, (refs) => this.listAll(userId, (b) => b.in("reference_id", refs)));
+    const byRef = await inBatches(q.references, (refs) => run((b) => b.in("reference_id", refs)));
     const byAmount = await inBatches(q.amounts, (amounts) =>
-      this.listAll(userId, (b) => {
+      run((b) => {
         let query = b.in("amount_minor", amounts).gte("occurred_at", q.from).lte("occurred_at", q.to);
         if (q.direction) query = query.eq("direction", q.direction);
         return query;
       }),
     );
-    const all = new Map<string, TransactionRow>();
+    const all = new Map<string, CandidateRow>();
     for (const row of [...byRef, ...byAmount]) all.set(row.id, row);
     return [...all.values()];
   }
@@ -38,6 +50,24 @@ export class TransactionsRepository extends BaseRepository<TransactionRow> {
     if (!error) return true;
     if (error.code === PG_ERROR.UNIQUE_VIOLATION) return false;
     throw fromDbError(error, "transactions.tryInsertMany");
+  }
+
+  private withSources(userId: string) {
+    return this.scoped(userId, CANDIDATE_COLUMNS);
+  }
+
+  /**
+   * Fills a linked transaction's missing details from the other statement (UTR from the bank,
+   * clean payee from the app). Never overwrites, and a UTR another transaction holds is skipped.
+   */
+  async enrich(userId: string, id: string, patch: Partial<TransactionRow>): Promise<void> {
+    if (Object.keys(patch).length === 0) return;
+    const { error } = await this.from().update(patch).eq("user_id", userId).eq("id", id);
+    if (!error) return;
+    if (error.code !== PG_ERROR.UNIQUE_VIOLATION) throw fromDbError(error, "transactions.enrich");
+    const rest = { ...patch };
+    delete rest.reference_id;
+    if (Object.keys(rest).length) unwrapMaybe(await this.from().update(rest).eq("user_id", userId).eq("id", id), "transactions.enrich");
   }
 
   async findByReference(userId: string, referenceId: string, direction: Direction): Promise<TransactionRow | null> {

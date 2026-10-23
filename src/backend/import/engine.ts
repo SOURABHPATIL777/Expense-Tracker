@@ -3,6 +3,7 @@ import { parseAmountToMinor } from "@/shared/utils/money";
 import type { Direction, TransactionStatus } from "@/backend/constants/enums.constants";
 import { parseUpiNarration } from "@/backend/domain/upiParse";
 import { istDate, parseStatementDate } from "./dates";
+import { directionsFromBalance } from "./balanceCheck";
 import { nullIfEmpty, normalizeHeader } from "./text";
 import type { ExtractedRow, ExtractResult, ImportConfig, ParsedEvent, TableRead, TableSpec } from "./types";
 
@@ -34,7 +35,8 @@ export function detectConfig(read: TableRead, configs: readonly ImportConfig[]):
 // ---------------------------------------------------------------------------
 
 export function extract(read: TableRead, config: ImportConfig): ExtractResult {
-  const rows = extractTable(read, config.table);
+  const table = extractTable(read, config.table);
+  const rows = config.table.amount.mode === "balance" ? directionsFromBalance(table) : table;
   const dates = rows.flatMap((r) => (r.parsed ? [istDate(r.parsed.occurredAt)] : [])).sort();
   return { rows, periodStart: dates[0] ?? null, periodEnd: dates.at(-1) ?? null };
 }
@@ -69,6 +71,11 @@ function resolveAmount(cell: (aliases?: string[]) => string, spec: TableSpec): R
     if (!value) return null;
     const direction: Direction = /\bdr\b/i.test(raw) ? "debit" : /\bcr\b/i.test(raw) ? "credit" : value < 0 ? "debit" : "credit";
     return { amountMinor: Math.abs(value), direction };
+  }
+  if (a.mode === "balance") {
+    // Direction is settled afterwards from the balance changes (directionsFromBalance).
+    const value = parseAmountToMinor(cell(a.amount));
+    return value ? { amountMinor: Math.abs(value), direction: "debit" } : null;
   }
   const value = parseAmountToMinor(cell(a.amount));
   if (!value) return null;
@@ -113,11 +120,16 @@ function buildEvent(fields: {
   };
 }
 
-/** Bank reference columns often hold cheque numbers or zeros; keep only plausible UTR/RRNs. */
-function normaliseRef(ref: string | null): string | null {
+/**
+ * Bank reference columns often hold cheque numbers or zeros; keep only plausible UTR/RRNs, and
+ * drop the zero padding some banks add ("0000427912345678" is UTR 427912345678), so the same
+ * payment's reference matches across the UPI app and the bank.
+ */
+export function normaliseRef(ref: string | null): string | null {
   const v = ref?.replace(/\s/g, "");
   if (!v || /^0+$/.test(v) || v.length < 6) return null;
-  return v;
+  const unpadded = v.replace(/^0+/, "");
+  return /^\d+$/.test(v) && v !== unpadded && unpadded.length >= 10 && unpadded.length <= 12 ? unpadded : v;
 }
 
 function extractTable(read: TableRead, spec: TableSpec): ExtractedRow[] {

@@ -13,8 +13,8 @@ Track spending from **PhonePe, Google Pay and Paytm** (plus bank statements) and
 
 | Area | Details |
 | --- | --- |
-| Import | Drop any CSV, Excel, PDF, HTML or JSON statement (several at once) and it's imported automatically. Every sheet, section and page is read. Tables, including PDFs laid out as tables, rebuilt from text positions, are matched against **stored layouts shared by all users**. Otherwise AI works out the columns once per header (proved on the file, then saved for everyone). Statements that aren't tables are read by AI in parallel chunks, each row kept only if its date and amount appear verbatim. Files that don't look like statements are rejected. PDF passwords are used once and never stored. |
-| Reconciliation | The same payment from the app and the bank is matched by UTR into one transaction. Amount + time near-matches go to review and are never merged automatically. Re-imports are deduplicated. |
+| Import | Drop any CSV, Excel, PDF, HTML or JSON statement (several at once). **Files are parsed on the server, never sent to AI.** Every sheet, section and page is read: tables (PDFs rebuilt from text positions) are mapped from their header names, statements that aren't tables (UPI-app PDFs, activity pages) by a record parser, and the bank or app is recognised from the statement's own header (IFSC, name). Every mapping is proved on the file, with running balances reconciled. Only a header that can't be mapped locally goes to AI, as the header plus at most 5 redacted rows, and the result is saved so it never needs AI again. Files that don't look like statements are rejected. PDF passwords are used once and never stored. |
+| Reconciliation | The same payment in a UPI-app statement and a bank statement becomes one transaction: matched by UTR (zero padding ignored), or without one by amount, direction and a posting window of −1 to +3 days, plus payee, UPI ID or time when there's a choice. Uncertain cases go to review. Overlapping or re-exported statements (PDF then Excel) aren't imported twice, and rows within one file are never treated as duplicates. |
 | Classification | Order: your rules → own transfers/refunds/card bills from the statement → **category map** (your own corrections first, then the longest shared keyword, e.g. `indmoney credit card repayment` beats `indmoney`) → payments to people = **Individual** (never stored in the map) → AI for anything left, whose keywords join the shared map. Anything you edit is locked and remembered for that merchant. |
 | Dashboard | Personal spending · all money out · paid for others · own transfers · income · refunds · owed to you · money expected back, plus categories and data completeness. |
 | Refunds | Track expected refunds and get matching credits suggested after each import. You confirm the match. An AI can draft a support message. |
@@ -63,7 +63,7 @@ Node 20.9+ is required; Node 22+ is recommended.
 1. Create a project and copy its URL, **publishable key** and **secret key**.
 2. **Authentication → Sign In / Providers:**
    - enable **Email**;
-   - enable **Anonymous sign-ins** (guest split links need it);
+   - enable **Anonymous sign-ins**. Guest split links need it; without it guests see "Guest links are switched off for this app right now";
    - turn on CAPTCHA protection for abuse resistance.
 3. **Authentication → URL configuration:**
    - Site URL = your app URL;
@@ -117,7 +117,7 @@ Import progress is pushed to the browser over Supabase Realtime instead of polli
 
 - **Never asked for:** UPI PIN, OTP or bank password. Statements are uploaded by the user.
 - **Row-level security:** RLS is on every table, and owner policies exclude anonymous sessions. Guests reach data only through `SECURITY DEFINER` functions that check their `guest_access` row and return only their own share.
-- **What reaches the AI model:** account numbers, phone numbers and emails are removed first (UTRs are kept when reading PDFs so payments can be reconciled). Statement text is passed as untrusted data. Totals are computed in SQL; the model only explains them. The shared tables hold no personal data: layouts store column names or a hash of a PDF's header lines, and the category map stores merchant keywords only.
+- **What reaches the AI model:** never a statement file or its text. The model sees, at most, the column header plus 5 redacted rows of a table layout nobody has seen before (only when it can't be mapped locally), single transactions' merchant names and narrations for categorisation, and computed totals for summaries. Account numbers, phone numbers and emails are removed first, and everything is passed as untrusted data. The shared tables hold no personal data: layouts store column names, and the category map stores merchant keywords only.
 - **Guest links:**
   - links are redeemed only by an explicit POST, never on GET, so chat previews don't consume them;
   - guest pages and APIs send `no-referrer` and `no-store`;

@@ -55,6 +55,25 @@ export const STATEMENT_HEADER_WORDS = [
   "amount", "balance", "type", "mode", "status", "upi", "account", "payee", "beneficiary",
 ] as const;
 
+/** IFSC bank codes (first 4 letters) → bank, for recognising a statement's bank from its header. */
+export const IFSC_BANKS = {
+  UTIB: "axis", KKBK: "kotak", AUBL: "au", HDFC: "hdfc", ICIC: "icici", SBIN: "sbi", PUNB: "pnb", BARB: "bob",
+  CNRB: "canara", UBIN: "union", BKID: "boi", IDIB: "indian", CBIN: "central", IOBA: "iob", UCBA: "uco",
+  MAHB: "bom", PSIB: "psb", YESB: "yes", IDFB: "idfc", INDB: "indusind", FDRL: "federal", RATN: "rbl",
+  IBKL: "idbi", BDBL: "bandhan", HSBC: "hsbc", SCBL: "sc",
+} as const;
+
+/** Names printed on statements (whole words, lower case) → bank or UPI app. Longer names first. */
+export const SOURCE_NAMES: ReadonlyArray<readonly [string, string]> = [
+  ["au small finance", "au"], ["kotak mahindra", "kotak"], ["axis bank", "axis"], ["hdfc bank", "hdfc"], ["icici bank", "icici"],
+  ["state bank of india", "sbi"], ["punjab national bank", "pnb"], ["bank of baroda", "bob"], ["canara bank", "canara"],
+  ["union bank of india", "union"], ["bank of india", "boi"], ["indian overseas bank", "iob"], ["indian bank", "indian"],
+  ["central bank of india", "central"], ["uco bank", "uco"], ["bank of maharashtra", "bom"], ["punjab & sind bank", "psb"],
+  ["yes bank", "yes"], ["idfc first", "idfc"], ["indusind", "indusind"], ["federal bank", "federal"], ["rbl bank", "rbl"],
+  ["idbi bank", "idbi"], ["bandhan bank", "bandhan"], ["hsbc", "hsbc"], ["standard chartered", "sc"],
+  ["phonepe", "phonepe"], ["google pay", "gpay"], ["gpay", "gpay"], ["paytm", "paytm"],
+];
+
 export const STATEMENT_TABLE = {
   MIN_HEADER_CELLS: 3,
   /** Fewer transaction rows than this and a file isn't treated as a statement. */
@@ -72,6 +91,11 @@ export const SALARY_HINT = { LOOKBACK_DAYS: 100, AMOUNT_TOLERANCE: 0.25 } as con
 export const MATCHING = {
   /** Cross-source duplicate window when no UTR is available. */
   DUPLICATE_WINDOW_HOURS: 24,
+  /** A bank may show a UPI-app payment up to this many days before / after the app's date. */
+  CROSS_SOURCE_DAYS_BEFORE: 1,
+  CROSS_SOURCE_DAYS_AFTER: 3,
+  /** App and bank times this close (when both have times) corroborate a match. */
+  SAME_TIME_MINUTES: 30,
   /** How far after a debit an incoming credit can be suggested as its refund. */
   REFUND_WINDOW_DAYS: 45,
   REPAYMENT_WINDOW_DAYS: 30,

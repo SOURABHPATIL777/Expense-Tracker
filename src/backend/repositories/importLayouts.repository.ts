@@ -38,8 +38,9 @@ export class ImportLayoutsRepository {
   }
 
   /** Saves a newly learned layout; if another import learned it first, returns that one. */
-  async save(layout: NewLayout): Promise<ImportLayoutRow> {
-    const { data, error } = await this.db.from(TABLES.IMPORT_LAYOUTS).insert({ ...layout, origin: "llm" }).select().single();
+  /** `origin`: "llm" when the AI worked the columns out, "manual" when they were mapped locally from the header. */
+  async save(layout: NewLayout, origin: ImportLayoutRow["origin"] = "llm"): Promise<ImportLayoutRow> {
+    const { data, error } = await this.db.from(TABLES.IMPORT_LAYOUTS).insert({ ...layout, origin }).select().single();
     cache = null;
     if (!error) return data as ImportLayoutRow;
     if (error.code !== PG_ERROR.UNIQUE_VIOLATION) throw new AppError("INTERNAL", { internal: error });

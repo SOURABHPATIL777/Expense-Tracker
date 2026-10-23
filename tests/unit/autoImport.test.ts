@@ -7,7 +7,6 @@ vi.mock("@/backend/llm/run", async (original) => ({ ...(await original<typeof im
 
 const { matchCategory, normalizeKeyword, keywordAppearsIn, resolveCategory } = await import("@/backend/domain/categoryMap");
 const { looksLikeIndividual } = await import("@/backend/domain/individual");
-const { verifyLlmRows, chunkLines, readPdfChunkWithLlm } = await import("@/backend/llm/pdfExtraction");
 const { mapColumnsWithLlm } = await import("@/backend/llm/columnMapping");
 const { readCsv } = await import("@/backend/import/readers/csv");
 
@@ -65,62 +64,11 @@ describe("looksLikeIndividual", () => {
   });
 });
 
-describe("verifyLlmRows (PDF anti-hallucination)", () => {
-  const chunk = "05 Oct 2024 Paid to Swiggy ₹350.00\nUPI Ref 427912345678\n06 Oct 2024 Received from Rahul ₹500.00";
-  const base = { time: null, counterparty: null, status: null, description: "Paid to Swiggy" };
-
-  it("keeps rows whose date and amount appear verbatim and parse", () => {
-    const { events, dropped } = verifyLlmRows(chunk, [{ ...base, date: "05 Oct 2024", amount: "₹350.00", direction: "debit", reference: "427912345678" }]);
-    expect(dropped).toBe(0);
-    expect(events[0]).toMatchObject({ amountMinor: 35000, direction: "debit", referenceId: "427912345678", narration: "Paid to Swiggy" });
-  });
-
-  it("drops rows with an amount or date that isn't in the text", () => {
-    const { events, dropped } = verifyLlmRows(chunk, [
-      { ...base, date: "05 Oct 2024", amount: "₹3,500.00", direction: "debit" },
-      { ...base, date: "07 Oct 2024", amount: "₹500.00", direction: "credit" },
-    ]);
-    expect(events).toHaveLength(0);
-    expect(dropped).toBe(2);
-  });
-
-  it("discards a reference the model made up but keeps the row", () => {
-    const { events } = verifyLlmRows(chunk, [{ ...base, date: "06 Oct 2024", amount: "500.00", direction: "credit", reference: "999999999999" }]);
-    expect(events[0].referenceId).toBeNull();
-  });
-
-  it("reads a PDF chunk end to end, keeping real rows and dropping invented ones", async () => {
-    const lines = readFileSync(join(process.cwd(), "tests/fixtures/synthetic/phonepe.lines.txt"), "utf8").split("\n").filter(Boolean);
-    runLlmTask.mockReset().mockResolvedValueOnce({
-      source: { sourceKind: "upi_app", sourceApp: "phonepe" },
-      rows: [
-        { date: "Oct 05, 2024", time: "10:32 am", description: "Paid to Swiggy", counterparty: "Swiggy", amount: "₹350", direction: "debit", reference: "427912345678" },
-        { date: "Oct 06, 2024", time: "08:05 pm", description: "Received from Rahul Sharma", counterparty: "Rahul Sharma", amount: "₹500", direction: "credit", reference: "427998765432" },
-        { date: "Oct 07, 2024", description: "Paid to Amazon", amount: "₹999", direction: "debit" },
-      ],
-    });
-    const out = await readPdfChunkWithLlm("user-1", lines, true);
-    expect(out.source).toEqual({ sourceKind: "upi_app", sourceApp: "phonepe" });
-    expect(out.dropped).toBe(1);
-    expect(out.events.map((e) => [e.direction, e.amountMinor, e.referenceId])).toEqual([
-      ["debit", 35000, "427912345678"],
-      ["credit", 50000, "427998765432"],
-    ]);
-    expect(out.events[0].occurredAt).toBe("2024-10-05T05:02:00.000Z");
-  });
-
-  it("chunks long text by size", () => {
-    const lines = Array.from({ length: 100 }, (_, i) => `line ${i} ${"x".repeat(40)}`);
-    const chunks = chunkLines(lines, 1_000);
-    expect(chunks.length).toBeGreaterThan(4);
-    expect(chunks.flat()).toEqual(lines);
-  });
-});
-
 describe("mapColumnsWithLlm", () => {
   const read = readCsv(readFileSync(join(process.cwd(), "tests/fixtures/synthetic/hdfc.csv")));
   const good = {
-    headerRowIndex: read.rows.findIndex((r) => r[0] === "Date"),
+    // The model sees only the header and 5 rows, and counts from the header.
+    headerRowIndex: 0,
     columns: { date: 0, narration: 1, reference: 2, balance: 6 },
     amount: { mode: "split", debit: 4, credit: 5 },
     dateFormat: "dd/MM/yy",
@@ -160,6 +108,16 @@ describe("mapColumnsWithLlm", () => {
     runLlmTask.mockResolvedValue(balanceAsReference);
     await expect(mapColumnsWithLlm("user-1", "statement.csv", read)).rejects.toThrow(/couldn't work out/);
     expect(runLlmTask.mock.calls[1][0].data).toMatch(/reference column holds amounts/);
+  });
+
+  it("sends the model only the header and at most 5 rows, never the document's other lines", async () => {
+    runLlmTask.mockResolvedValueOnce(good);
+    await mapColumnsWithLlm("user-1", "statement.csv", read);
+    const payload = JSON.parse(runLlmTask.mock.calls[0][0].data) as { rows: Array<{ cells: string[] }>; documentStart?: unknown };
+    expect(payload.rows[0].cells[0]).toBe("Date");
+    expect(payload.rows.length).toBeLessThanOrEqual(6);
+    expect(payload.documentStart).toBeUndefined();
+    expect(JSON.stringify(payload)).not.toContain("Statement of account");
   });
 
   it("gives up after two mappings that don't parse", async () => {

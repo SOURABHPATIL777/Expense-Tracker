@@ -16,6 +16,13 @@ export function guestService(db: Db) {
     async redeem(token: string, auth: AuthContext | null): Promise<{ participantId: string }> {
       if (!auth) {
         const { error } = await db.auth.signInAnonymously();
+        // "anonymous_provider_disabled": Supabase → Authentication → Sign In / Providers → allow anonymous sign-ins.
+        if (error?.code === "anonymous_provider_disabled") {
+          throw new AppError("UPSTREAM", {
+            message: "Guest links are switched off for this app right now. Ask the person who shared it to try again later.",
+            internal: { code: error.code, fix: "Enable anonymous sign-ins in Supabase Auth settings" },
+          });
+        }
         if (error) throw new AppError("UPSTREAM", { message: "Couldn't start a guest session. Try again.", internal: { code: error.code } });
       }
       const participantId = unwrap(await db.rpc(RPC.REDEEM_INVITE, { p_token_hash: sha256Hex(token) }), "guest.redeem") as string;
